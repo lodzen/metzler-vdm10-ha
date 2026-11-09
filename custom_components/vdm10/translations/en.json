@@ -1,0 +1,66 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "VDM10 intercom",
+        "description": "Register this Home Assistant instance as a room station on the VDM10 SIP registrar (usually the main indoor unit). The doorbell rings this extension; the camera shows the outdoor station.",
+        "data": {
+          "registrar_host": "Registrar host (main indoor station IP)",
+          "registrar_port": "Registrar SIP port",
+          "username": "Extension number (e.g. 10000000005)",
+          "password": "Extension SIP password",
+          "serial": "Device serial (regDevSerial)",
+          "local_ip": "This host's IP on the intercom VLAN",
+          "listen_port": "Local SIP port",
+          "rtsp_port": "Local RTSP talkback port",
+          "door_host": "Outdoor station (doorbell) host",
+          "door_user": "Door ISAPI/RTSP user",
+          "door_password": "Door ISAPI/RTSP password",
+          "name": "Display name (optional)"
+        }
+      }
+    },
+    "error": {
+      "required": "Required field",
+      "cannot_bind": "Address not on this host or port already in use"
+    },
+    "abort": {
+      "already_configured": "This intercom (serial@registrar) is already configured."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "doorbell_ringing": {
+        "name": "Doorbell ringing"
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Intercom status"
+      }
+    },
+    "camera": {
+      "door": {
+        "name": "Door camera"
+      }
+    },
+    "button": {
+      "answer_call": {
+        "name": "Answer call"
+      },
+      "hangup": {
+        "name": "Hang up"
+      }
+    }
+  },
+  "services": {
+    "answer_call": {
+      "name": "Answer call",
+      "description": "Answers the ringing VDM10 doorbell call (200 OK, audio established; mic stays muted until the talk control is used)."
+    },
+    "hangup_call": {
+      "name": "Hang up call",
+      "description": "Declines the ringing call or hangs up the established call."
+    }
+  }
+}

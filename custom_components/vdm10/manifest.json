@@ -1,0 +1,13 @@
+{
+  "domain": "vdm10",
+  "name": "VDM10 Intercom",
+  "codeowners": ["@lodzen"],
+  "config_flow": true,
+  "documentation": "https://github.com/lodzen/metzler-vdm10-ha",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/lodzen/metzler-vdm10-ha/issues",
+  "loggers": ["custom_components.vdm10", "indoor"],
+  "requirements": [],
+  "version": "0.1.0"
+}

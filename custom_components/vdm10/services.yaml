@@ -1,0 +1,17 @@
+answer_call:
+  name: Answer call
+  description: >-
+    Answers the ringing VDM10 doorbell call (200 OK, audio established; the
+    microphone stays muted until the camera's talk control is used).
+  target:
+    entity:
+      integration: vdm10
+      domain: button
+
+hangup_call:
+  name: Hang up call
+  description: Declines the ringing call or hangs up the established call.
+  target:
+    entity:
+      integration: vdm10
+      domain: button
