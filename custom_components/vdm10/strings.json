@@ -56,7 +56,8 @@
       "required": "Required field",
       "cannot_bind": "Address not on this host or port already in use",
       "cannot_reach": "Could not determine a local IP that reaches the registrar",
-      "nothing_found": "No VDM10 devices answered - check the network or pick Manual."
+      "nothing_found": "No VDM10 devices answered - check the network or pick Manual.",
+      "docker_detected": "Container networking detected - enter the host machine's LAN IP below; network scan is unavailable."
     },
     "abort": {
       "already_configured": "This intercom (serial@registrar) is already configured."

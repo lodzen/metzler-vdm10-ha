@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from homeassistant.data_entry_flow import FlowResultType
 
 from conftest import ENTRY_DATA
@@ -30,6 +31,15 @@ MANUAL_MIN = {
     CONF_DOOR_HOST: "127.0.0.1",
     "advanced": {"rtsp_port": 8554},
 }
+
+
+@pytest.fixture(autouse=True)
+def _no_docker():
+    """these tests assume host networking - pin docker_detected off; the docker
+    cases patch it back to True locally."""
+    with patch("custom_components.vdm10.config_flow._docker", return_value=False):
+        yield
+
 
 DISCOVERY_RESULT = {
     "doors": [
@@ -139,6 +149,36 @@ async def test_discover_nothing_found_still_shows_form(hass, socket_enabled):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "discover"})
     assert result["type"] is FlowResultType.FORM and result["step_id"] == "discover"
     assert result["errors"]["base"] == "nothing_found"
+
+
+async def test_docker_skips_scan_and_asks_local_ip(hass, socket_enabled):
+    """container detected -> 'Search the network' bounces to manual with the
+    host-IP question; the subnet scan never runs"""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    with (
+        patch("custom_components.vdm10.config_flow._docker", return_value=True),
+        patch("custom_components.vdm10.config_flow._run_discovery") as scan,
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "discover"})
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "manual"
+    assert result["errors"]["base"] == "docker_detected"
+    scan.assert_not_called()
+    markers = {k.schema: type(k).__name__ for k in result["data_schema"].schema}
+    assert markers.get(CONF_LOCAL_IP) == "Required"
+
+
+async def test_docker_local_ip_required_then_accepted(hass, socket_enabled):
+    with patch("custom_components.vdm10.config_flow._docker", return_value=True):
+        flow_id = await _go_manual(hass)
+        result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"][CONF_LOCAL_IP] == "required"
+        with patch("custom_components.vdm10.station.HaStation.async_start", new=AsyncMock()):
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {**MANUAL_MIN, CONF_LOCAL_IP: "10.0.0.123"}
+            )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_LOCAL_IP] == "10.0.0.123"
 
 
 async def test_provider_fields_landed_in_entry(hass, socket_enabled):

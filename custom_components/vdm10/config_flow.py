@@ -121,32 +121,43 @@ def _check_bind(ip: str, listen_port: int, rtsp_port: int) -> str | None:
     return None
 
 
-def _manual_schema(prefill: dict) -> vol.Schema:
-    """the manual/field form; ``prefill`` carries values found by discovery."""
+def _docker() -> bool:
+    """container runtime -> derived IPs are the NAT'd bridge address; the user
+    must tell us the host's real LAN IP."""
+    from metzler import discovery
+
+    return discovery.docker_detected()
+
+
+def _manual_schema(prefill: dict, ask_local_ip: bool = False) -> vol.Schema:
+    """the manual/field form; ``prefill`` carries values found by discovery.
+
+    ``local_ip`` is auto-derived on a normal host (hidden in Advanced) but
+    becomes a required top-level field inside containers (docker_detected).
+    """
     adv = prefill.get(CONF_ADVANCED, {})
-    return vol.Schema(
+    fields = {
+        vol.Required(CONF_REGISTRAR_HOST, default=prefill.get(CONF_REGISTRAR_HOST, "")): str,
+        vol.Required(CONF_USERNAME, default=prefill.get(CONF_USERNAME, "")): str,
+        vol.Required(CONF_PASSWORD, default=""): str,
+        vol.Required(CONF_DOOR_HOST, default=adv.get(CONF_DOOR_HOST, prefill.get(CONF_DOOR_HOST, ""))): str,
+        vol.Optional(CONF_NAME, default=""): str,
+    }
+    if ask_local_ip:
+        fields[vol.Required(CONF_LOCAL_IP, default=prefill.get(CONF_LOCAL_IP, ""))] = str
+    advanced = {
+        vol.Optional(CONF_REGISTRAR_PORT, default=adv.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT)): PORT,
+        vol.Optional(CONF_SERIAL, default=adv.get(CONF_SERIAL, "")): str,
+        vol.Optional(CONF_LISTEN_PORT, default=adv.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT)): PORT,
+        vol.Optional(CONF_RTSP_PORT, default=adv.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)): PORT,
+        vol.Optional(CONF_DOOR_USER, default=adv.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)): str,
+        vol.Optional(CONF_DOOR_PASSWORD, default=adv.get(CONF_DOOR_PASSWORD, "")): str,
+    }
+    if not ask_local_ip:
+        advanced[vol.Optional(CONF_LOCAL_IP, default=adv.get(CONF_LOCAL_IP, ""))] = str
+    fields.update(
         {
-            vol.Required(CONF_REGISTRAR_HOST, default=prefill.get(CONF_REGISTRAR_HOST, "")): str,
-            vol.Required(CONF_USERNAME, default=prefill.get(CONF_USERNAME, "")): str,
-            vol.Required(CONF_PASSWORD, default=""): str,
-            vol.Required(CONF_DOOR_HOST, default=adv.get(CONF_DOOR_HOST, prefill.get(CONF_DOOR_HOST, ""))): str,
-            vol.Optional(CONF_NAME, default=""): str,
-            vol.Optional(CONF_ADVANCED): section(
-                vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_REGISTRAR_PORT, default=adv.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT)
-                        ): PORT,
-                        vol.Optional(CONF_LOCAL_IP, default=adv.get(CONF_LOCAL_IP, "")): str,
-                        vol.Optional(CONF_SERIAL, default=adv.get(CONF_SERIAL, "")): str,
-                        vol.Optional(CONF_LISTEN_PORT, default=adv.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT)): PORT,
-                        vol.Optional(CONF_RTSP_PORT, default=adv.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)): PORT,
-                        vol.Optional(CONF_DOOR_USER, default=adv.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)): str,
-                        vol.Optional(CONF_DOOR_PASSWORD, default=adv.get(CONF_DOOR_PASSWORD, "")): str,
-                    }
-                ),
-                {"collapsed": True},
-            ),
+            vol.Optional(CONF_ADVANCED): section(vol.Schema(advanced), {"collapsed": True}),
             vol.Optional(CONF_PROVIDER): section(
                 vol.Schema(
                     {
@@ -176,6 +187,7 @@ def _manual_schema(prefill: dict) -> vol.Schema:
             ),
         }
     )
+    return vol.Schema(fields)
 
 
 class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -191,6 +203,9 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_discover(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        if user_input is None and _docker():
+            # container IP is useless for a subnet scan - ask for the host IP
+            return self._show_manual(self._prefill, {"base": "docker_detected"})
         if user_input is None:
             found = await self.hass.async_add_executor_job(_run_discovery)
             registrar_opts = found["registrars"] + found["candidates"] + [DISCOVER_MANUAL]
@@ -217,13 +232,16 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._prefill[CONF_USERNAME] = ext
         if door != DISCOVER_MANUAL:
             self._prefill[CONF_DOOR_HOST] = door
-        return self.async_show_form(step_id="manual", data_schema=_manual_schema(self._prefill), errors={})
+        return self._show_manual(self._prefill, {})
 
     async def async_step_manual(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            if _docker() and not str(user_input.get(CONF_LOCAL_IP) or "").strip():
+                errors[CONF_LOCAL_IP] = "required"
+                return self._show_manual(user_input, errors)
             return await self._finish(user_input, errors)
-        return self.async_show_form(step_id="manual", data_schema=_manual_schema(self._prefill), errors={})
+        return self._show_manual(self._prefill, errors)
 
     async def _finish(self, user_input: dict, errors: dict) -> ConfigFlowResult:
         data = _flatten(user_input)
@@ -249,7 +267,8 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=data[CONF_NAME] or f"VDM10 {data[CONF_USERNAME]}", data=data)
 
     def _show_manual(self, user_input: dict, errors: dict) -> ConfigFlowResult:
-        return self.async_show_form(step_id="manual", data_schema=_manual_schema(user_input), errors=errors)
+        schema = _manual_schema(user_input, ask_local_ip=_docker())
+        return self.async_show_form(step_id="manual", data_schema=schema, errors=errors)
 
 
 def _flatten(user_input: dict) -> dict:
@@ -262,7 +281,7 @@ def _flatten(user_input: dict) -> dict:
         CONF_DOOR_HOST: user_input[CONF_DOOR_HOST].strip(),
         CONF_NAME: user_input.get(CONF_NAME, ""),
         CONF_REGISTRAR_PORT: adv.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT),
-        CONF_LOCAL_IP: adv.get(CONF_LOCAL_IP),
+        CONF_LOCAL_IP: user_input.get(CONF_LOCAL_IP) or adv.get(CONF_LOCAL_IP),
         CONF_SERIAL: adv.get(CONF_SERIAL),
         CONF_LISTEN_PORT: adv.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT),
         CONF_RTSP_PORT: adv.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT),
