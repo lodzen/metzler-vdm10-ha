@@ -16,11 +16,11 @@ metzler = { path = "../metzler-vdm10", editable = true }
 
 [dependency-groups]
 dev = [
-    # PHACC 0.13.375 pins homeassistant==2026.10.4; a PHACC for 2026.11 does not
-    # exist yet, so the test env tracks the newest testable HA release
-    "homeassistant==2026.10.4",
+    # pytest-homeassistant is the officially maintained core test package
+    # (home-assistant/core/packages/pytest-homeassistant); it pins HA + pytest
+    "homeassistant==2026.11.1",
     "pytest==9.0.3",
-    "pytest-homeassistant-custom-component>=0.13.375",
+    "pytest-homeassistant==2026.11.1",
     "ruff>=0.17.3,<0.18",
     "ty>=0.0.95,<0.0.96",
     "complexipy>=4.2,<5",

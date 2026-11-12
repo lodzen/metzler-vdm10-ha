@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote
 
-from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera import Camera, CameraEntityCapabilities, CameraEntityFeature
 from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -49,9 +49,10 @@ class Vdm10DoorCamera(Camera):
     _attr_has_entity_name = True
     _attr_translation_key = "door"
     _attr_supported_features = CameraEntityFeature.STREAM
-    # no explicit stream-type/capabilities attr: HA 2026.10 auto-negotiates
-    # WebRTC from the registered webrtc providers (go2rtc incl. its ISAPI
-    # two-way backchannel); the entity just exposes the RTSP source
+    # two-way talk is declared for the WebRTC path (HA 2026.11 preview
+    # feature); the actual audio rides go2rtc's ISAPI backchannel when the
+    # user enables Labs -> two_way_audio and a webrtc provider is registered
+    _attr_camera_entity_capabilities = CameraEntityCapabilities(two_way_audio=True)
 
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__()

@@ -3,26 +3,60 @@
     "step": {
       "user": {
         "title": "VDM10 intercom",
-        "description": "Register this Home Assistant instance as a room station on the VDM10 SIP registrar (usually the main indoor unit). The doorbell rings this extension; the camera shows the outdoor station.",
+        "description": "Set up the VDM10 door intercom. Searching the network finds the outdoor station (doorbell) and the main indoor unit automatically.",
+        "menu_options": {
+          "discover": "Search the network",
+          "manual": "Manual setup"
+        }
+      },
+      "discover": {
+        "title": "VDM10 discovery",
+        "description": "Devices found on the network. The registrar answer identifies the main indoor unit; outdoor stations report via SADP.",
         "data": {
-          "registrar_host": "Registrar host (main indoor station IP)",
-          "registrar_port": "Registrar SIP port",
-          "username": "Extension number (e.g. 10000000005)",
+          "registrar_pick": "Main indoor unit (registrar)",
+          "door_pick": "Outdoor station (doorbell)"
+        }
+      },
+      "manual": {
+        "title": "VDM10 intercom",
+        "description": "Register Home Assistant as a room station on the VDM10 SIP registrar (the main indoor unit). Only its IP and the extension password are required - everything else is derived.",
+        "data": {
+          "registrar_host": "Main indoor station IP",
+          "username": "Extension number (e.g. 10000000002)",
           "password": "Extension SIP password",
-          "serial": "Device serial (regDevSerial)",
-          "local_ip": "This host's IP on the intercom VLAN",
+          "door_host": "Outdoor station (doorbell) IP",
+          "name": "Display name (optional)",
+          "advanced": "Advanced",
+          "registrar_port": "Registrar SIP port",
+          "local_ip": "This host's IP (auto-derived if empty)",
+          "serial": "Device serial (auto-generated if empty)",
           "listen_port": "Local SIP port",
           "rtsp_port": "Local RTSP talkback port",
-          "door_host": "Outdoor station (doorbell) host",
           "door_user": "Door ISAPI/RTSP user",
-          "door_password": "Door ISAPI/RTSP password",
-          "name": "Display name (optional)"
+          "door_password": "Door ISAPI/RTSP password (defaults to extension password)",
+          "provider": "SIP provider (Linphone/PBX, optional)",
+          "sip_host": "Provider host (e.g. sip.linphone.org)",
+          "sip_port": "Provider port",
+          "sip_user": "Provider user",
+          "sip_pass": "Provider password",
+          "sip_target": "Number/extension to ring on incoming calls",
+          "sip_domain": "Registrar domain in the REGISTER (optional)",
+          "sip_srtp": "Offer SRTP to the provider",
+          "fritz": "Fritz!Box trunk (optional)",
+          "fritz_host": "Fritz!Box host (e.g. fritz.box)",
+          "fritz_port": "Fritz!Box SIP port",
+          "fritz_domain": "Registrar domain in the fritz REGISTER",
+          "fritz_user": "Fritz!Box SIP user (e.g. 620)",
+          "fritz_pass": "Fritz!Box SIP password",
+          "fritz_target": "Number to ring on the fritzfon (e.g. **9)"
         }
       }
     },
     "error": {
       "required": "Required field",
-      "cannot_bind": "Address not on this host or port already in use"
+      "cannot_bind": "Address not on this host or port already in use",
+      "cannot_reach": "Could not determine a local IP that reaches the registrar",
+      "nothing_found": "No VDM10 devices answered - check the network or pick Manual."
     },
     "abort": {
       "already_configured": "This intercom (serial@registrar) is already configured."

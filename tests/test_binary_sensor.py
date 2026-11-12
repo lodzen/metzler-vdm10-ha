@@ -61,6 +61,20 @@ async def test_answer_fires_answered_event_and_clears_ring(hass, runtime):
     assert call.local.mic_frame() == b"\xff" * 160
 
 
+async def test_provider_win_reports_answered_by_other(hass, runtime):
+    """ha_mode + trunk race: the provider leg 200-OKs first -> the library
+    fires 'answered' without async_answer_call ever running -> by=other"""
+    answered = []
+    hass.bus.async_listen(EVENT_ANSWERED, answered.append)
+    await fire_ring(runtime)
+    call = runtime.station.station.calls["doorcall1"]
+    runtime.station.station._fire_event("answered", call)  # provider_answered path
+    await hass.async_block_till_done()
+    assert answered[0].data == {"call_id": "doorcall1", "by": "other"}
+    # answering after the other side won is a no-op on the HA side
+    assert not await runtime.async_answer_call()
+
+
 async def test_hangup_declines_and_fires_ended(hass, runtime):
     ended = []
     hass.bus.async_listen(EVENT_CALL_ENDED, ended.append)

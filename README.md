@@ -4,11 +4,17 @@ Home Assistant custom integration for the Metzler/Hikvision **VDM10** door inter
 It embeds the standalone [`metzler-vdm10`](../metzler-vdm10) SIP library and registers
 your HA instance as a room station on the VDM10 SIP registrar.
 
+> **Firmware support: VDM10 1.0 only.** The integration targets the VDM10 1.0
+> firmware (protocol reverse-engineered in `metzler-vdm10`). **VDM10 2.0 is not
+> supported at the moment.**
+
 - `binary_sensor.*_doorbell_ringing` — on while the doorbell rings (events for automations)
 - `camera.*_door` — live view of the outdoor station, **pull-on-demand only**
 - `button.*_answer_call` / `button.*_hang_up` — explicit call control
 - `sensor.*_intercom_status` — registration diagnostics (`registered`/`connecting`/`unavailable`, `last_error`)
 - Two-way audio via go2rtc/ISAPI — microphone **muted by default**
+- Optional SIP provider / Fritz!Box trunk — the door call rings HA *and* your app/fritzfon; first answer wins
+- LAN auto-discovery for the outdoor station (SADP) and the main indoor (registrar fingerprint)
 
 ## Install (HACS / Marketplace custom repository)
 
@@ -16,7 +22,8 @@ your HA instance as a room station on the VDM10 SIP registrar.
    **Custom repositories / Add from link** → add `https://github.com/lodzen/metzler-vdm10-ha`
    as an *Integration* repository.
 2. Install **VDM10 Intercom**, restart Home Assistant.
-3. **Settings → Devices & Services → Add Integration → VDM10 Intercom** and fill in the form.
+3. **Settings → Devices & Services → Add Integration → VDM10 Intercom** —
+   choose **Search the network** for auto-discovery or **Manual setup**.
 
 The release ZIP ships the `metzler` library vendored under
 `custom_components/vdm10/vendor/` (built by `tools/vendor.py`) — no manual
@@ -24,21 +31,46 @@ dependency install and no PyPI requirement.
 
 ## Configuration
 
+Only the **main indoor station IP** and the **extension password** are
+strictly required — everything else is derived or auto-discovered:
+
 | Field | Meaning | Default |
 |---|---|---|
-| `registrar_host` | SIP registrar — usually the **main indoor station** IP | required |
+| `registrar_host` | SIP registrar — the **main indoor station** IP | required / auto-found |
+| `username` | your extension number | suggested: lowest free slot |
+| `password` | extension SIP password | required |
+| `door_host` | outdoor station (doorbell) IP | auto-found via SADP |
+| `name` | display name | `VDM10 <extension>` |
+| Advanced ⤵ | | |
 | `registrar_port` | registrar SIP port | `5065` |
-| `username` | your extension number | e.g. `10000000005` |
-| `password` | extension SIP password | — |
-| `serial` | device serial (`regDevSerial`) | required |
-| `local_ip` | this host's IP on the intercom VLAN | required |
+| `local_ip` | this host's IP on the intercom VLAN | auto (UDP-connect to registrar) |
+| `serial` | device serial (`regDevSerial`) | auto-generated |
 | `listen_port` | local SIP UDP port | `5060` |
 | `rtsp_port` | local RTSP talkback port (callers pull our mic here) | `554` |
-| `door_host` | outdoor station (doorbell) IP — camera + ISAPI | required |
-| `door_user` / `door_password` | door ISAPI/RTSP credentials (Basic auth) | `admin` |
+| `door_user` / `door_password` | door ISAPI/RTSP credentials (Basic auth) | `admin` / extension password |
+| SIP provider ⤵ | optional — Linphone/PBX trunk (`sip_host`/`sip_user`/`sip_pass`/`sip_target`/`sip_domain`/`sip_srtp`) | off |
+| Fritz!Box ⤵ | optional second trunk (`fritz_host`/`fritz_user`/`fritz_pass`/`fritz_target`) | off |
 
-One entry per system; `unique_id` = `serial@registrar`. Credentials are never
-written to logs, entity attributes, unique IDs, or event payloads.
+### Discovery
+
+**Search the network** runs two firmware-native probes:
+
+- **SADP inquiry** (`239.255.255.250:37020` + unicast sweep) finds the outdoor
+  station — it answers with IP, serial, MAC and device type (`VDM10-VM-POE`).
+- **Registrar fingerprint**: a REGISTER probe on `:5065` — only the *main*
+  indoor answers (extensions stay silent). Slot probing also reveals which
+  extension numbers are taken, so the flow suggests a **free extension**.
+
+The indoor units do *not* answer SADP — the main is identified solely by the
+REGISTER fingerprint (replies arrive on `:5060`, a firmware quirk).
+
+### SIP provider / Fritz trunk (optional)
+
+With `sip_host` (Linphone, Asterisk, any PBX) and/or the Fritz!Box section
+filled in, an incoming door call is parked for HA **and** INVITEd to the
+trunk — whichever side answers first wins; the other leg is CANCELed.
+`vdm10_answered` reports `by: "ha"` or `by: "other"`. Leaving both empty keeps
+HA-only answering.
 
 ## Entities, services, events
 
@@ -63,7 +95,8 @@ during a ring does **not** answer the call.
 
 ## Two-way audio (go2rtc + ISAPI)
 
-For browser talkback over WebRTC you need:
+The camera declares `two_way_audio` (HA 2026.11 preview feature) — it resolves
+when a WebRTC stream provider is present and the Labs flag is on. You need:
 
 - the standalone **go2rtc** add-on with a stream merging video + ISAPI backchannel:
 
@@ -90,7 +123,7 @@ uv run pytest ../metzler-vdm10           # library suite (must stay green)
 uv run ruff check custom_components tests tools
 uv run ruff format custom_components tests tools
 uv run ty check
-uv run complexipy custom_components/vdm10 tests tools
+uv run complexipy custom_components/vdm10 tests tools -e vendor
 ```
 
 **Release**: `uv run python tools/vendor.py` vendors `../metzler-vdm10/src/metzler`
@@ -99,17 +132,22 @@ committed `vendor/__init__.py` loader appends that dir to `sys.path` before the
 first `import metzler`. `tests/test_vendor.py` verifies the vendored import in
 isolation. Then tag a GitHub release — HACS serves the tag.
 
-Test environment pins `homeassistant==2026.10.4` (the newest HA a released
-`pytest-homeassistant-custom-component` supports); `hacs.json` declares
-`homeassistant: 2026.10.0` as the install minimum.
+Test environment pins `homeassistant==2026.11.1` with the officially
+maintained `pytest-homeassistant` package (home-assistant/core); `hacs.json`
+declares `homeassistant: 2026.11.0` as the install minimum (the camera's
+`two_way_audio` capability needs 2026.11+).
 
 ## Notes & limitations
 
+- **VDM10 1.0 only** — firmware 2.0 speaks a different dialect; not supported.
 - The mic queue (`server.mic` → PCMU silence while empty) is the *fallback*
   talk path; on the primary go2rtc path, mute-by-default is enforced platform-side.
 - `answered_elsewhere` is a best-effort label — see `vdm10_call_ended` above.
 - Library internals: SIP registrar `:5065`, station SIP `:5060`, RTSP `:554`,
   talkback RTP `9654` — never bind TCP 8102 (visNet push port).
+- Discovery probes bind `:5060` briefly (the registrar answers there) — running
+  discovery while an entry is active can be unreliable; the form falls back to
+  manual entry.
 
 ## License
 

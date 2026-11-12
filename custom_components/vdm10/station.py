@@ -16,6 +16,12 @@ from . import vendor as _vendor_loader  # noqa: F401 - vendored metzler on sys.p
 from .const import (
     CONF_DOOR_PASSWORD,
     CONF_DOOR_USER,
+    CONF_FRITZ_DOMAIN,
+    CONF_FRITZ_HOST,
+    CONF_FRITZ_PASS,
+    CONF_FRITZ_PORT,
+    CONF_FRITZ_TARGET,
+    CONF_FRITZ_USER,
     CONF_LISTEN_PORT,
     CONF_LOCAL_IP,
     CONF_PASSWORD,
@@ -23,11 +29,21 @@ from .const import (
     CONF_REGISTRAR_PORT,
     CONF_RTSP_PORT,
     CONF_SERIAL,
+    CONF_SIP_DOMAIN,
+    CONF_SIP_HOST,
+    CONF_SIP_PASS,
+    CONF_SIP_PORT,
+    CONF_SIP_SRTP,
+    CONF_SIP_TARGET,
+    CONF_SIP_USER,
     CONF_USERNAME,
     DEFAULT_DOOR_USER,
+    DEFAULT_FRITZ_DOMAIN,
+    DEFAULT_FRITZ_PORT,
     DEFAULT_LISTEN_PORT,
     DEFAULT_REGISTRAR_PORT,
     DEFAULT_RTSP_PORT,
+    DEFAULT_SIP_PORT,
 )
 
 if TYPE_CHECKING:
@@ -43,40 +59,83 @@ def build_options(entry_data: dict):
     from metzler.cli import build_parser, finalize_options
 
     ap = build_parser({})
-    o = ap.parse_args(
-        [
-            "--server",
-            entry_data[CONF_REGISTRAR_HOST],
-            "--server-port",
-            str(entry_data.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT)),
-            "--username",
-            entry_data[CONF_USERNAME],
-            "--password",
-            entry_data.get(CONF_PASSWORD, ""),
-            "--name",
-            "vdm10-ha",
-            "--serial",
-            entry_data[CONF_SERIAL],
-            "--local-ip",
-            entry_data[CONF_LOCAL_IP],
-            "--listen-port",
-            str(entry_data.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT)),
-            "--rtsp-port",
-            str(entry_data.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)),
-            "--door-isapi-user",
-            entry_data.get(CONF_DOOR_USER, DEFAULT_DOOR_USER),
-            "--door-isapi-pass",
-            entry_data.get(CONF_DOOR_PASSWORD, ""),
-            "--auto-answer",
-            "off",  # belt and suspenders: ha_mode already parks calls
-        ]
-    )
+    argv = [
+        "--server",
+        entry_data[CONF_REGISTRAR_HOST],
+        "--server-port",
+        str(entry_data.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT)),
+        "--username",
+        entry_data[CONF_USERNAME],
+        "--password",
+        entry_data.get(CONF_PASSWORD, ""),
+        "--name",
+        "vdm10-ha",
+        "--serial",
+        entry_data[CONF_SERIAL],
+        "--local-ip",
+        entry_data[CONF_LOCAL_IP],
+        "--listen-port",
+        str(entry_data.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT)),
+        "--rtsp-port",
+        str(entry_data.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)),
+        "--door-isapi-user",
+        entry_data.get(CONF_DOOR_USER, DEFAULT_DOOR_USER),
+        "--door-isapi-pass",
+        entry_data.get(CONF_DOOR_PASSWORD, ""),
+        "--auto-answer",
+        "off",  # belt and suspenders: ha_mode already parks calls
+    ]
+    argv += _provider_argv(entry_data)
+    o = ap.parse_args(argv)
     o.ha_mode = True  # programmatic flag only - NOT a cli.py option
     finalize_options(o, ap)
     o.call_events = None  # wired by async_start (needs the HA loop callback)
     o.ha_mic_feed = None  # wired by async_start
     o.ha_on_audio = None  # v1: no consumer for door-audio frames
     return o
+
+
+def _provider_argv(entry_data: dict) -> list[str]:
+    """optional SIP provider (Linphone/PBX) + Fritz!Box trunk args.
+
+    Empty host = disabled. When either trunk is configured, an incoming door
+    call is parked for HA *and* rings the trunk - first answer wins (library
+    race semantics); the HA-side win CANCELs the trunk legs.
+    """
+    argv: list[str] = []
+    if entry_data.get(CONF_SIP_HOST):
+        argv += [
+            "--sip-host",
+            entry_data[CONF_SIP_HOST],
+            "--sip-port",
+            str(entry_data.get(CONF_SIP_PORT, DEFAULT_SIP_PORT)),
+            "--sip-user",
+            entry_data.get(CONF_SIP_USER, ""),
+            "--sip-pass",
+            entry_data.get(CONF_SIP_PASS, ""),
+        ]
+        if entry_data.get(CONF_SIP_TARGET):
+            argv += ["--sip-target", entry_data[CONF_SIP_TARGET]]
+        if entry_data.get(CONF_SIP_DOMAIN):
+            argv += ["--sip-domain", entry_data[CONF_SIP_DOMAIN]]
+        argv += ["--sip-srtp" if entry_data.get(CONF_SIP_SRTP, True) else "--no-sip-srtp"]
+    if entry_data.get(CONF_FRITZ_HOST):
+        argv += [
+            "--fritz",
+            "--fritz-host",
+            entry_data[CONF_FRITZ_HOST],
+            "--fritz-port",
+            str(entry_data.get(CONF_FRITZ_PORT, DEFAULT_FRITZ_PORT)),
+            "--fritz-domain",
+            entry_data.get(CONF_FRITZ_DOMAIN, DEFAULT_FRITZ_DOMAIN),
+            "--fritz-user",
+            entry_data.get(CONF_FRITZ_USER, ""),
+            "--fritz-pass",
+            entry_data.get(CONF_FRITZ_PASS, ""),
+        ]
+        if entry_data.get(CONF_FRITZ_TARGET):
+            argv += ["--fritz-call-button", entry_data[CONF_FRITZ_TARGET]]
+    return argv
 
 
 class HaStation:

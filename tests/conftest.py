@@ -8,7 +8,7 @@ localhost-only, nothing leaves the machine.
 """
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.vdm10.const import (
     CONF_DOOR_HOST,
@@ -26,7 +26,7 @@ from custom_components.vdm10.const import (
 )
 from metzler.sip.message import Packet
 
-pytest_plugins = "pytest_homeassistant_custom_component"
+pytest_plugins = "pytest_homeassistant.plugins"
 
 ENTRY_DATA = {
     CONF_REGISTRAR_HOST: "127.0.0.1",
