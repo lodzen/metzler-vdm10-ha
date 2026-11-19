@@ -1,7 +1,28 @@
 """Doorbell ring sensor + vdm10_* bus events (US1)."""
 
-from conftest import fire_ring
-from custom_components.vdm10.const import EVENT_ANSWERED, EVENT_CALL_ENDED, EVENT_RING
+import pytest
+from pytest_homeassistant.common import MockConfigEntry
+
+from conftest import ENTRY_DATA, fire_ring
+from custom_components.vdm10.const import CONF_SIP_HOST, EVENT_ANSWERED, EVENT_CALL_ENDED, EVENT_RING
+
+
+@pytest.fixture
+async def provider_runtime(hass, socket_enabled):
+    """entry with a provider trunk configured -> the provider registration
+    entity exists (pointing at a dead localhost port, so 'off')"""
+    entry = MockConfigEntry(
+        domain="vdm10",
+        data={**ENTRY_DATA, CONF_SIP_HOST: "127.0.0.1"},
+        title="VDM10 test",
+        unique_id="Q12345678@127.0.0.1",
+    )
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    yield entry.runtime_data
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
 
 
 def _sensor(hass):
@@ -83,3 +104,49 @@ async def test_hangup_declines_and_fires_ended(hass, runtime):
     await hass.async_block_till_done()
     assert "doorcall1" not in runtime.station.station.calls
     assert ended[0].data["reason"] == "declined"
+
+
+# ------------------------------------------------------- registration sensors
+
+
+async def test_intercom_registration_tracks_the_registrar(hass, runtime):
+    entity = hass.states.get("binary_sensor.vdm10_test_intercom_registration")
+    assert entity is not None and entity.state == "off"  # dead registrar port
+    runtime.station.station.registered.set()
+    runtime._poll_registration(None)
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.vdm10_test_intercom_registration").state == "on"
+
+
+async def test_trunk_entities_only_exist_when_configured(hass, runtime):
+    # ENTRY_DATA configures no provider/fritz -> those legs get no entity
+    assert hass.states.get("binary_sensor.vdm10_test_provider_registration") is None
+    assert hass.states.get("binary_sensor.vdm10_test_fritz_box_registration") is None
+
+
+async def test_provider_registration_entity(hass, provider_runtime):
+    entity = hass.states.get("binary_sensor.vdm10_test_provider_registration")
+    assert entity is not None
+    assert entity.state == "off"  # trunk configured, dead port -> not registered
+
+
+async def test_fritz_registration_entity_from_options_only(hass, socket_enabled):
+    """fritz set via the options flow lands in entry.options - the entity must
+    still appear (regression: the gate used to read entry.data only)."""
+    from custom_components.vdm10.const import CONF_FRITZ_HOST, CONF_FRITZ_PASS, CONF_FRITZ_USER
+
+    entry = MockConfigEntry(
+        domain="vdm10",
+        data=ENTRY_DATA,
+        options={CONF_FRITZ_HOST: "127.0.0.1", CONF_FRITZ_USER: "u", CONF_FRITZ_PASS: "p"},
+        title="VDM10 test",
+        unique_id="Q12345678@127.0.0.1",
+    )
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    entity = hass.states.get("binary_sensor.vdm10_test_fritz_box_registration")
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entity is not None
+    assert entity.state == "off"

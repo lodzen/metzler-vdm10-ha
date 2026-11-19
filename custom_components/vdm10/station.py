@@ -22,6 +22,7 @@ from .const import (
     CONF_FRITZ_PORT,
     CONF_FRITZ_TARGET,
     CONF_FRITZ_USER,
+    CONF_INBOUND_TARGET,
     CONF_LISTEN_PORT,
     CONF_LOCAL_IP,
     CONF_PASSWORD,
@@ -51,6 +52,34 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+_COMPONENT_LOGGER_NAME = __name__.rsplit(".", 1)[0]  # custom_components.vdm10
+
+
+class _LibraryLogForward(logging.Handler):
+    """Re-emit library records under this integration's logger name.
+
+    The library logs everything on one flat logger ("indoor") - forwarding
+    (rather than propagation) renames each record to
+    ``custom_components.vdm10.indoor`` so HA's log output and the ``logs:``
+    level control attribute them to the component, not the library.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        record.name = f"{_COMPONENT_LOGGER_NAME}.{record.name}"
+        target = logging.getLogger(record.name)
+        if target.isEnabledFor(record.levelno):
+            target.handle(record)
+
+
+# re-parent under the integration so `logs: custom_components.vdm10` gates
+# record creation on the library logger; propagate stays off - the handler
+# above re-names each record to the component instead of letting it bubble
+# up under the original "indoor" name
+_library_log = logging.getLogger("indoor")
+_library_log.parent = logging.getLogger(_COMPONENT_LOGGER_NAME)
+_library_log.propagate = False
+_library_log.addHandler(_LibraryLogForward())
+
 
 def build_options(entry_data: dict):
     """argparse namespace for ``IndoorStation`` - built through the library's own
@@ -69,7 +98,7 @@ def build_options(entry_data: dict):
         "--password",
         entry_data.get(CONF_PASSWORD, ""),
         "--name",
-        "vdm10-ha",
+        "Home Assistant",
         "--serial",
         entry_data[CONF_SERIAL],
         "--local-ip",
@@ -135,7 +164,23 @@ def _provider_argv(entry_data: dict) -> list[str]:
         ]
         if entry_data.get(CONF_FRITZ_TARGET):
             argv += ["--fritz-call-button", entry_data[CONF_FRITZ_TARGET]]
+    if argv:  # a trunk exists -> inbound SIP calls ring the intercom
+        argv += ["--inbound-target", entry_data.get(CONF_INBOUND_TARGET) or _main_indoor_ext(entry_data)]
     return argv
+
+
+def _main_indoor_ext(entry_data: dict) -> str:
+    """the registrar IS the main indoor: devLongNum `1000000000N` with N=0
+    (intercom-registration.md room-class table; seen live: .38 INVITEs as
+    sip:10000000000@...). It can't be reached VIA the registrar - a call to
+    its own number is silently dropped - so the default dials it directly on
+    :5060 (`num@ip`, the firmware's netAltRoute path). A nonstandard username
+    scheme gets no guess - the field stays editable."""
+    u = entry_data.get(CONF_USERNAME, "")
+    host = entry_data.get(CONF_REGISTRAR_HOST, "")
+    if u.startswith("1000000000") and len(u) == 11 and host:
+        return f"{u[:10]}0@{host}"
+    return ""
 
 
 class HaStation:
@@ -179,7 +224,10 @@ class HaStation:
 
     async def async_start(self) -> None:
         """construct + start the station off the event loop; raises OSError on bind failure"""
-        opts = await self._hass.async_add_executor_job(build_options, self._entry.data)
+        opts = await self._hass.async_add_executor_job(
+            build_options,
+            {**self._entry.data, **self._entry.options},  # options flow overrides data
+        )
         opts.call_events = self._forward_call_event
         opts.ha_mic_feed = self._mic_frame
         from metzler.station.station import IndoorStation

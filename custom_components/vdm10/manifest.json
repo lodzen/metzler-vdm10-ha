@@ -3,6 +3,11 @@
   "name": "VDM10 Intercom",
   "codeowners": ["@lodzen"],
   "config_flow": true,
+  "dhcp": [
+    {
+      "macaddress": "BC9B5E*"
+    }
+  ],
   "documentation": "https://github.com/lodzen/metzler-vdm10-ha",
   "integration_type": "device",
   "iot_class": "local_push",

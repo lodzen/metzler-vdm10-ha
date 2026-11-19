@@ -28,6 +28,7 @@ CONF_SIP_PASS = "sip_pass"
 CONF_SIP_TARGET = "sip_target"
 CONF_SIP_DOMAIN = "sip_domain"
 CONF_SIP_SRTP = "sip_srtp"
+CONF_INBOUND_TARGET = "inbound_target"  # intercom extension rung when the SIP side calls us
 CONF_FRITZ_HOST = "fritz_host"
 CONF_FRITZ_PORT = "fritz_port"
 CONF_FRITZ_DOMAIN = "fritz_domain"

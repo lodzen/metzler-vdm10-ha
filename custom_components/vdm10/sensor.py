@@ -43,10 +43,15 @@ class Vdm10StatusSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {
+        attrs = {
             "last_error": self.runtime.last_error,
             "active_calls": len(self.runtime.sessions),
         }
+        if (prov := self.runtime.provider_registered) is not None:
+            attrs["provider_registered"] = prov
+        if (fritz := self.runtime.fritz_registered) is not None:
+            attrs["fritz_registered"] = fritz
+        return attrs
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(async_dispatcher_connect(self.hass, self.runtime.signal, self._handle_runtime_update))

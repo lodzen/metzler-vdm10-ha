@@ -29,9 +29,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> boo
     except (OSError, ValueError) as err:
         raise ConfigEntryNotReady(f"VDM10 station failed to start: {err}") from err
     entry.runtime_data = runtime
+    entry.async_on_unload(entry.add_update_listener(_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
     return True
+
+
+async def _update_listener(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> None:
+    """options changed -> reload so build_options picks them up"""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> bool:

@@ -27,6 +27,7 @@ async def test_idle_setup_never_touches_the_door(hass, runtime):
         spy.assert_not_called()
     for attr in ("_stream", "_puller", "_rtsp", "_session", "_reader"):
         assert not hasattr(cam, attr), f"camera unexpectedly owns {attr}"
+    assert cam._http is None  # session opens on the first still, not at setup
 
 
 async def test_stream_source_url_on_demand(hass, runtime):
@@ -46,3 +47,33 @@ async def test_stream_source_does_not_answer_a_ring(hass, runtime):
     call = runtime.station.station.calls["doorcall1"]
     assert call.state == "early"  # still parked - never established by viewing
     assert runtime.ringing_call is not None
+
+
+async def test_snapshot_answers_the_digest_challenge(hass, runtime):
+    """Hikvision ISAPI answers Basic with 401 - the snapshot must complete the
+    Digest challenge and return the JPEG bytes"""
+    from aiohttp import web
+
+    seen = []
+
+    async def picture(request):
+        auth = request.headers.get("Authorization", "")
+        if "Digest username=" not in auth:
+            raise web.HTTPUnauthorized(headers={"WWW-Authenticate": 'Digest realm="isapi",nonce="abc123",qop=auth'})
+        seen.append(auth)
+        return web.Response(body=b"\xff\xd8jpeg-bytes", content_type="image/jpeg")
+
+    app = web.Application()
+    app.router.add_get("/ISAPI/Streaming/channels/101/picture", picture)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    try:
+        port = runner.addresses[0][1]
+        with patch("custom_components.vdm10.camera.DOOR_ISAPI_PORT", port):
+            image = await _camera(hass).async_camera_image()
+        assert image == b"\xff\xd8jpeg-bytes"
+        assert seen and 'username="admin"' in seen[0]
+    finally:
+        await runner.cleanup()

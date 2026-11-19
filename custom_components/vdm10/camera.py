@@ -59,6 +59,22 @@ class Vdm10DoorCamera(Camera):
         self.runtime = runtime
         self._attr_unique_id = f"vdm10_{runtime.serial}_door_camera"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, runtime.serial)})
+        self._http = None  # shared session - lazy, keeps digest state + keep-alive
+
+    def _get_http(self):
+        """one long-lived session per entity: DigestAuthMiddleware caches the
+        door's challenge and preempts it on later fetches - a fresh session per
+        call would pay the 401 round trip + connect on every still."""
+        import aiohttp
+
+        if self._http is None or self._http.closed:
+            cfg = self.runtime.entry.data
+            digest = aiohttp.DigestAuthMiddleware(
+                login=str(cfg.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)),
+                password=str(cfg.get(CONF_DOOR_PASSWORD, "")),
+            )
+            self._http = aiohttp.ClientSession(middlewares=(digest,))
+        return self._http
 
     async def stream_source(self) -> str:
         """credentials embedded - the door demands Basic auth on RTSP DESCRIBE"""
@@ -76,20 +92,17 @@ class Vdm10DoorCamera(Camera):
         try:
             import aiohttp
 
-            auth = aiohttp.BasicAuth(
-                str(cfg.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)),
-                str(cfg.get(CONF_DOOR_PASSWORD, "")),
-            )
-            async with (
-                aiohttp.ClientSession() as session,
-                session.get(url, auth=auth, timeout=aiohttp.ClientTimeout(total=5)) as resp,
-            ):
+            async with self._get_http().get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status == 200:
                     return await resp.read()
                 _LOGGER.debug("door snapshot returned HTTP %s", resp.status)
         except Exception as err:  # door offline / non-Hikvision firmware
             _LOGGER.debug("door snapshot failed: %s", err)
         return None
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._http is not None:
+            await self._http.close()
 
     @property
     def available(self) -> bool:

@@ -16,13 +16,16 @@ Only the main indoor's IP + password are strictly required:
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import socket
 
 import probatio as vol  # HA's voluptuous fork; data_schema wants probatio.Schema
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_NAME
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
     CONF_ADVANCED,
@@ -36,6 +39,7 @@ from .const import (
     CONF_FRITZ_PORT,
     CONF_FRITZ_TARGET,
     CONF_FRITZ_USER,
+    CONF_INBOUND_TARGET,
     CONF_LISTEN_PORT,
     CONF_LOCAL_IP,
     CONF_PASSWORD,
@@ -61,12 +65,14 @@ from .const import (
     DEFAULT_SIP_PORT,
     DISCOVER_MANUAL,
     DOMAIN,
+    DOOR_ISAPI_PORT,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 PORT = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
 DISCOVER_TIMEOUT = 3.0
+PROBE_TIMEOUT = 6.0  # free_extension sweeps slot-by-slot; 410s are fast but a hit adds unreg retries
 
 
 def _serial_for(registrar: str, username: str) -> str:
@@ -97,9 +103,65 @@ def _free_extension(registrar: str) -> str | None:
     from metzler import discovery
 
     try:
-        return discovery.free_extension(registrar, timeout=DISCOVER_TIMEOUT)
+        return discovery.free_extension(registrar, timeout=PROBE_TIMEOUT)
     except OSError:
         return None
+
+
+def _door_host() -> str | None:
+    """executor: first outdoor station found by the SADP scan, else None."""
+    try:
+        doors = _run_discovery()["doors"]
+    except OSError:
+        return None
+    return (doors[0].get("IPv4Address") or doors[0].get("_ip")) if doors else None
+
+
+def _sip_statuses(data: dict) -> dict:
+    """executor: REGISTER status code per configured leg - the intercom
+    registrar probe runs the same dialect as free_extension (200 -> the row
+    is removed again); provider/fritz get a standard digest REGISTER when
+    credentials exist (trunk mode without them can't be verified)."""
+    from metzler import discovery
+
+    results = {
+        "registrar": discovery.register_status(
+            data[CONF_REGISTRAR_HOST],
+            data[CONF_USERNAME],
+            data[CONF_SERIAL],
+            data[CONF_LOCAL_IP],
+            data[CONF_REGISTRAR_PORT],
+        )
+    }
+    if data.get(CONF_SIP_HOST) and data.get(CONF_SIP_USER):
+        results[CONF_PROVIDER] = discovery.provider_status(
+            data[CONF_SIP_HOST],
+            data.get(CONF_SIP_PORT, DEFAULT_SIP_PORT),
+            data[CONF_SIP_USER],
+            data.get(CONF_SIP_PASS, ""),
+            data.get(CONF_SIP_DOMAIN) or data[CONF_SIP_HOST],
+            data[CONF_LOCAL_IP],
+        )
+    if data.get(CONF_FRITZ_HOST) and data.get(CONF_FRITZ_USER):
+        results[CONF_FRITZ] = discovery.provider_status(
+            data[CONF_FRITZ_HOST],
+            data.get(CONF_FRITZ_PORT, DEFAULT_FRITZ_PORT),
+            data[CONF_FRITZ_USER],
+            data.get(CONF_FRITZ_PASS, ""),
+            data.get(CONF_FRITZ_DOMAIN) or data[CONF_FRITZ_HOST],
+            data[CONF_LOCAL_IP],
+        )
+    return results
+
+
+def _probe_role(ip: str) -> str:
+    """executor: door stations serve ISAPI HTTP on :80; indoor units don't
+    run HTTP at all (observed: main indoor has :554/:8000/:8102, no :80)."""
+    try:
+        socket.create_connection((ip, DOOR_ISAPI_PORT), timeout=1.0).close()
+        return "door"
+    except OSError:
+        return "registrar"
 
 
 def _check_bind(ip: str, listen_port: int, rtsp_port: int) -> str | None:
@@ -121,6 +183,15 @@ def _check_bind(ip: str, listen_port: int, rtsp_port: int) -> str | None:
     return None
 
 
+def _looks_natted(ip: str) -> bool:
+    """172.16.0.0/12 is docker's default bridge space — a local_ip derived
+    there is the container's NAT address, not a usable host LAN IP."""
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network("172.16.0.0/12")
+    except ValueError:
+        return True
+
+
 def _docker() -> bool:
     """container runtime -> derived IPs are the NAT'd bridge address; the user
     must tell us the host's real LAN IP."""
@@ -138,9 +209,9 @@ def _manual_schema(prefill: dict, ask_local_ip: bool = False) -> vol.Schema:
     adv = prefill.get(CONF_ADVANCED, {})
     fields = {
         vol.Required(CONF_REGISTRAR_HOST, default=prefill.get(CONF_REGISTRAR_HOST, "")): str,
-        vol.Required(CONF_USERNAME, default=prefill.get(CONF_USERNAME, "")): str,
+        vol.Optional(CONF_USERNAME, default=prefill.get(CONF_USERNAME, "")): str,
         vol.Required(CONF_PASSWORD, default=""): str,
-        vol.Required(CONF_DOOR_HOST, default=adv.get(CONF_DOOR_HOST, prefill.get(CONF_DOOR_HOST, ""))): str,
+        vol.Optional(CONF_DOOR_HOST, default=adv.get(CONF_DOOR_HOST, prefill.get(CONF_DOOR_HOST, ""))): str,
         vol.Optional(CONF_NAME, default=""): str,
     }
     if ask_local_ip:
@@ -168,6 +239,7 @@ def _manual_schema(prefill: dict, ask_local_ip: bool = False) -> vol.Schema:
                         vol.Optional(CONF_SIP_TARGET, default=""): str,
                         vol.Optional(CONF_SIP_DOMAIN, default=""): str,
                         vol.Optional(CONF_SIP_SRTP, default=False): bool,
+                        vol.Optional(CONF_INBOUND_TARGET, default=""): str,
                     }
                 ),
                 {"collapsed": True},
@@ -201,6 +273,33 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="user", menu_options=["discover", "manual"])
 
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> ConfigFlowResult:
+        """DHCP discovery (Hikvision OUI match): :80 probe decides whether the
+        found unit is the outdoor station (ISAPI) or an indoor (registrar).
+        The LAN scan then fills whatever we don't know yet - the missing
+        side, the next free extension, and this host's IP."""
+        self._async_abort_entries_match({CONF_REGISTRAR_HOST: discovery_info.ip})
+        self.context["title_placeholders"] = {"host": discovery_info.ip}
+        role = await self.hass.async_add_executor_job(_probe_role, discovery_info.ip)
+        self._prefill[CONF_DOOR_HOST if role == "door" else CONF_REGISTRAR_HOST] = discovery_info.ip
+        try:
+            self._prefill[CONF_LOCAL_IP] = await self.hass.async_add_executor_job(
+                _local_ip_for, discovery_info.ip, DEFAULT_REGISTRAR_PORT
+            )
+        except OSError:
+            pass
+        found = await self.hass.async_add_executor_job(_run_discovery)
+        if not self._prefill.get(CONF_DOOR_HOST) and found["doors"]:
+            door = found["doors"][0]
+            self._prefill[CONF_DOOR_HOST] = door.get("IPv4Address") or door.get("_ip")
+        if not self._prefill.get(CONF_REGISTRAR_HOST) and found["registrars"]:
+            self._prefill[CONF_REGISTRAR_HOST] = found["registrars"][0]
+        if self._prefill.get(CONF_REGISTRAR_HOST):
+            ext = await self.hass.async_add_executor_job(_free_extension, self._prefill[CONF_REGISTRAR_HOST])
+            if ext:
+                self._prefill[CONF_USERNAME] = ext
+        return await self.async_step_manual()
+
     async def async_step_discover(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is None and _docker():
@@ -230,6 +329,12 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             ext = await self.hass.async_add_executor_job(_free_extension, registrar)
             if ext:
                 self._prefill[CONF_USERNAME] = ext
+            try:
+                self._prefill[CONF_LOCAL_IP] = await self.hass.async_add_executor_job(
+                    _local_ip_for, registrar, DEFAULT_REGISTRAR_PORT
+                )
+            except OSError:
+                pass
         if door != DISCOVER_MANUAL:
             self._prefill[CONF_DOOR_HOST] = door
         return self._show_manual(self._prefill, {})
@@ -238,17 +343,28 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             if _docker() and not str(user_input.get(CONF_LOCAL_IP) or "").strip():
-                errors[CONF_LOCAL_IP] = "required"
-                return self._show_manual(user_input, errors)
+                # host-networked containers derive fine; only NAT'd bridges
+                # (or no route) still need the host's LAN IP typed in
+                try:
+                    user_input[CONF_LOCAL_IP] = await self.hass.async_add_executor_job(
+                        _local_ip_for,
+                        str(user_input.get(CONF_REGISTRAR_HOST, "")).strip(),
+                        DEFAULT_REGISTRAR_PORT,
+                    )
+                except OSError:
+                    user_input[CONF_LOCAL_IP] = ""
+                if _looks_natted(user_input[CONF_LOCAL_IP]):
+                    user_input[CONF_LOCAL_IP] = ""
+                if not user_input[CONF_LOCAL_IP]:
+                    errors[CONF_LOCAL_IP] = "required"
+                    return self._show_manual(user_input, errors)
             return await self._finish(user_input, errors)
         return self._show_manual(self._prefill, errors)
 
     async def _finish(self, user_input: dict, errors: dict) -> ConfigFlowResult:
         data = _flatten(user_input)
-        for key in (CONF_REGISTRAR_HOST, CONF_DOOR_HOST, CONF_USERNAME):
-            if not data[key]:
-                errors[key] = "required"
-        if errors:
+        if not data[CONF_REGISTRAR_HOST]:
+            errors[CONF_REGISTRAR_HOST] = "required"
             return self._show_manual(user_input, errors)
         if not data[CONF_LOCAL_IP]:
             try:
@@ -257,11 +373,43 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except OSError:
                 return self._show_manual(user_input, {"base": "cannot_reach"})
+        if not data[CONF_USERNAME]:
+            if ext := await self.hass.async_add_executor_job(_free_extension, data[CONF_REGISTRAR_HOST]):
+                data[CONF_USERNAME] = ext
+            else:
+                errors[CONF_USERNAME] = "cannot_detect_extension"
+        if not data[CONF_DOOR_HOST]:
+            if door := await self.hass.async_add_executor_job(_door_host):
+                data[CONF_DOOR_HOST] = door
+            else:
+                errors[CONF_DOOR_HOST] = "cannot_detect_door"
+        if errors:
+            return self._show_manual(user_input, errors)
         data[CONF_SERIAL] = data[CONF_SERIAL] or _serial_for(data[CONF_REGISTRAR_HOST], data[CONF_USERNAME])
         if bad := await self.hass.async_add_executor_job(
             _check_bind, data[CONF_LOCAL_IP], data[CONF_LISTEN_PORT], data[CONF_RTSP_PORT]
         ):
             return self._show_manual(user_input, {bad: "cannot_bind"})
+        statuses = await self.hass.async_add_executor_job(_sip_statuses, data)
+        reg = statuses["registrar"]
+        if reg is None:
+            errors[CONF_REGISTRAR_HOST] = "cannot_connect"
+        elif reg == 410:
+            errors[CONF_USERNAME] = "extension_conflict"
+        elif reg in (401, 403):
+            errors[CONF_PASSWORD] = "invalid_auth"
+        elif reg != 200:
+            errors[CONF_REGISTRAR_HOST] = "register_rejected"
+        for leg in (CONF_PROVIDER, CONF_FRITZ):
+            code = statuses.get(leg, 200)
+            if code is None:
+                errors[leg] = "cannot_connect"
+            elif code in (401, 403, 404, 407):
+                errors[leg] = "invalid_auth"
+            elif not 200 <= code < 300:
+                errors[leg] = "register_rejected"
+        if errors:
+            return self._show_manual(user_input, errors)
         await self.async_set_unique_id(f"{data[CONF_SERIAL]}@{data[CONF_REGISTRAR_HOST]}")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=data[CONF_NAME] or f"VDM10 {data[CONF_USERNAME]}", data=data)
@@ -270,15 +418,89 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = _manual_schema(user_input, ask_local_ip=_docker())
         return self.async_show_form(step_id="manual", data_schema=schema, errors=errors)
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return Vdm10OptionsFlow()
+
+
+class Vdm10OptionsFlow(OptionsFlow):
+    """re-edit every entry parameter without re-adding; saving reloads it."""
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data=_flatten(user_input))
+        return self.async_show_form(
+            step_id="init", data_schema=_options_schema({**self.config_entry.data, **self.config_entry.options})
+        )
+
+
+def _options_schema(flat: dict) -> vol.Schema:
+    """same field set as the manual form, defaults from the flat entry dict.
+    No live probes here - the running station already holds :5060."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_REGISTRAR_HOST, default=flat.get(CONF_REGISTRAR_HOST, "")): str,
+            vol.Optional(CONF_USERNAME, default=flat.get(CONF_USERNAME, "")): str,
+            vol.Required(CONF_PASSWORD, default=flat.get(CONF_PASSWORD, "")): str,
+            vol.Optional(CONF_DOOR_HOST, default=flat.get(CONF_DOOR_HOST, "")): str,
+            vol.Optional(CONF_NAME, default=flat.get(CONF_NAME, "")): str,
+            vol.Optional(CONF_ADVANCED): section(
+                vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_REGISTRAR_PORT, default=flat.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT)
+                        ): PORT,
+                        vol.Optional(CONF_LOCAL_IP, default=flat.get(CONF_LOCAL_IP, "")): str,
+                        vol.Optional(CONF_SERIAL, default=flat.get(CONF_SERIAL, "")): str,
+                        vol.Optional(CONF_LISTEN_PORT, default=flat.get(CONF_LISTEN_PORT, DEFAULT_LISTEN_PORT)): PORT,
+                        vol.Optional(CONF_RTSP_PORT, default=flat.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)): PORT,
+                        vol.Optional(CONF_DOOR_USER, default=flat.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)): str,
+                        vol.Optional(CONF_DOOR_PASSWORD, default=flat.get(CONF_DOOR_PASSWORD, "")): str,
+                    }
+                ),
+                {"collapsed": True},
+            ),
+            vol.Optional(CONF_PROVIDER): section(
+                vol.Schema(
+                    {
+                        vol.Optional(CONF_SIP_HOST, default=flat.get(CONF_SIP_HOST, "")): str,
+                        vol.Optional(CONF_SIP_PORT, default=flat.get(CONF_SIP_PORT, DEFAULT_SIP_PORT)): PORT,
+                        vol.Optional(CONF_SIP_USER, default=flat.get(CONF_SIP_USER, "")): str,
+                        vol.Optional(CONF_SIP_PASS, default=flat.get(CONF_SIP_PASS, "")): str,
+                        vol.Optional(CONF_SIP_TARGET, default=flat.get(CONF_SIP_TARGET, "")): str,
+                        vol.Optional(CONF_SIP_DOMAIN, default=flat.get(CONF_SIP_DOMAIN, "")): str,
+                        vol.Optional(CONF_SIP_SRTP, default=flat.get(CONF_SIP_SRTP, False)): bool,
+                        vol.Optional(CONF_INBOUND_TARGET, default=flat.get(CONF_INBOUND_TARGET, "")): str,
+                    }
+                ),
+                {"collapsed": True},
+            ),
+            vol.Optional(CONF_FRITZ): section(
+                vol.Schema(
+                    {
+                        vol.Optional(CONF_FRITZ_HOST, default=flat.get(CONF_FRITZ_HOST, "")): str,
+                        vol.Optional(CONF_FRITZ_PORT, default=flat.get(CONF_FRITZ_PORT, DEFAULT_FRITZ_PORT)): PORT,
+                        vol.Optional(CONF_FRITZ_DOMAIN, default=flat.get(CONF_FRITZ_DOMAIN, DEFAULT_FRITZ_DOMAIN)): str,
+                        vol.Optional(CONF_FRITZ_USER, default=flat.get(CONF_FRITZ_USER, "")): str,
+                        vol.Optional(CONF_FRITZ_PASS, default=flat.get(CONF_FRITZ_PASS, "")): str,
+                        vol.Optional(CONF_FRITZ_TARGET, default=flat.get(CONF_FRITZ_TARGET, "")): str,
+                    }
+                ),
+                {"collapsed": True},
+            ),
+        }
+    )
+
 
 def _flatten(user_input: dict) -> dict:
     """merge the advanced/provider/fritz sections into one flat data dict"""
     adv = user_input.get(CONF_ADVANCED) or {}
     data = {
         CONF_REGISTRAR_HOST: user_input[CONF_REGISTRAR_HOST].strip(),
-        CONF_USERNAME: user_input[CONF_USERNAME].strip(),
+        CONF_USERNAME: user_input.get(CONF_USERNAME, "").strip(),
         CONF_PASSWORD: user_input[CONF_PASSWORD],
-        CONF_DOOR_HOST: user_input[CONF_DOOR_HOST].strip(),
+        CONF_DOOR_HOST: user_input.get(CONF_DOOR_HOST, "").strip(),
         CONF_NAME: user_input.get(CONF_NAME, ""),
         CONF_REGISTRAR_PORT: adv.get(CONF_REGISTRAR_PORT, DEFAULT_REGISTRAR_PORT),
         CONF_LOCAL_IP: user_input.get(CONF_LOCAL_IP) or adv.get(CONF_LOCAL_IP),

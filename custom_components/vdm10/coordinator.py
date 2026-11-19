@@ -13,6 +13,7 @@ import datetime
 import logging
 from dataclasses import dataclass
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
@@ -52,6 +53,7 @@ class Vdm10Runtime:
         self.sessions: dict[str, RingSession] = {}
         self.last_error: str | None = None
         self._registered = False
+        self._reg_state = (False, None, None)  # (intercom, provider, fritz)
         self._remove_status_timer = None
 
     @property
@@ -67,6 +69,22 @@ class Vdm10Runtime:
         return bool(self.station and self.station.registered)
 
     @property
+    def provider_registered(self) -> bool | None:
+        """linphone/PBX leg state; None when no provider trunk is configured"""
+        st = self.station.station if self.station else None
+        if st is None or st.provider is None or not st.provider.needs_register():
+            return None
+        return st.provider.registered.is_set()
+
+    @property
+    def fritz_registered(self) -> bool | None:
+        """fritz trunk leg state; None when no fritz trunk is configured"""
+        st = self.station.station if self.station else None
+        if st is None or st.fritz is None or not st.fritz.needs_register():
+            return None
+        return st.fritz.registered.is_set()
+
+    @property
     def ringing_call(self) -> RingSession | None:
         return next((s for s in self.sessions.values() if s.state == "early"), None)
 
@@ -79,6 +97,14 @@ class Vdm10Runtime:
         self.station.on_call_event = self._on_call_event
         await self.station.async_start()
         self._remove_status_timer = async_track_time_interval(self.hass, self._poll_registration, STATUS_POLL_INTERVAL)
+        # HA does not unload entries on shutdown - without this hook a restart
+        # never sends Expires:0 and the registrar row lingers until its TTL.
+        # async_on_unload cancels the listener when the entry unloads, so the
+        # two paths can't both fire async_stop.
+        self.entry.async_on_unload(self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._handle_ha_stop))
+
+    async def _handle_ha_stop(self, _event) -> None:
+        await self.async_stop()
 
     async def async_stop(self) -> None:
         if self._remove_status_timer:
@@ -89,13 +115,17 @@ class Vdm10Runtime:
             await self.hass.async_add_executor_job(station.shutdown_sync)
         self.sessions.clear()
         self._registered = False
+        self._reg_state = (False, None, None)
         async_dispatcher_send(self.hass, self.signal)  # entities go unavailable
 
     @callback
     def _poll_registration(self, _now) -> None:
-        """registration is a threading.Event in the library - poll + diff"""
-        if self.registered != self._registered:
-            self._registered = self.registered
+        """registrations are threading.Events in the library - poll + diff.
+        The provider/fritz legs flip independently, so all three feed the diff."""
+        current = (self.registered, self.provider_registered, self.fritz_registered)
+        if current != self._reg_state:
+            self._reg_state = current
+            self._registered = current[0]
             async_dispatcher_send(self.hass, self.signal)
 
     # ---------------------------------------------------------------- events

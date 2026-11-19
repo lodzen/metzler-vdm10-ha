@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "VDM10 intercom ({host})",
     "step": {
       "user": {
         "title": "VDM10 intercom",
@@ -22,9 +23,9 @@
         "description": "Register Home Assistant as a room station on the VDM10 SIP registrar (the main indoor unit). Only its IP and the extension password are required - everything else is derived.",
         "data": {
           "registrar_host": "Main indoor station IP",
-          "username": "Extension number (e.g. 10000000002)",
+          "username": "Extension number (empty = auto-detect next free, e.g. 10000000002)",
           "password": "Extension SIP password",
-          "door_host": "Outdoor station (doorbell) IP",
+          "door_host": "Outdoor station (doorbell) IP (empty = auto-detect via network scan)",
           "name": "Display name (optional)",
           "advanced": "Advanced",
           "registrar_port": "Registrar SIP port",
@@ -34,14 +35,15 @@
           "rtsp_port": "Local RTSP talkback port",
           "door_user": "Door ISAPI/RTSP user",
           "door_password": "Door ISAPI/RTSP password (defaults to extension password)",
-          "provider": "SIP provider (Linphone/PBX, optional)",
+          "provider": "SIP provider (Linphone/PBX, optional - host/user/pass suffice, rest is derived)",
           "sip_host": "Provider host (e.g. sip.linphone.org)",
           "sip_port": "Provider port",
           "sip_user": "Provider user",
           "sip_pass": "Provider password",
-          "sip_target": "Number/extension to ring on incoming calls",
-          "sip_domain": "Registrar domain in the REGISTER (optional)",
+          "sip_target": "Ring target for incoming calls (empty = sip:<user>@<domain>, all account devices)",
+          "sip_domain": "Provider domain in the REGISTER (empty = same as host)",
           "sip_srtp": "Offer SRTP to the provider",
+          "inbound_target": "Intercom extension to ring when called via SIP (empty = the main indoor station)",
           "fritz": "Fritz!Box trunk (optional)",
           "fritz_host": "Fritz!Box host (e.g. fritz.box)",
           "fritz_port": "Fritz!Box SIP port",
@@ -56,17 +58,71 @@
       "required": "Required field",
       "cannot_bind": "Address not on this host or port already in use",
       "cannot_reach": "Could not determine a local IP that reaches the registrar",
+      "cannot_detect_extension": "Could not detect a free extension slot - enter the extension number manually (e.g. 10000000002)",
+      "cannot_detect_door": "No outdoor station answered the network scan - enter its IP manually",
       "nothing_found": "No VDM10 devices answered - check the network or pick Manual.",
-      "docker_detected": "Container networking detected - enter the host machine's LAN IP below; network scan is unavailable."
+      "docker_detected": "Container networking detected - enter the host machine's LAN IP below; network scan is unavailable.",
+      "cannot_connect": "No reply - check address/port and that this host can reach it",
+      "invalid_auth": "Authentication failed - check the credentials",
+      "extension_conflict": "This extension is already held by another device - pick a different number (e.g. the next free one)",
+      "register_rejected": "The server rejected the registration - check port and settings"
     },
     "abort": {
       "already_configured": "This intercom (serial@registrar) is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "VDM10 options",
+        "description": "All settings from the initial setup, editable afterwards. Saving reloads the entry.",
+        "data": {
+          "registrar_host": "Main indoor station IP",
+          "username": "Extension number",
+          "password": "Extension SIP password",
+          "door_host": "Outdoor station (doorbell) IP",
+          "name": "Display name",
+          "advanced": "Advanced",
+          "registrar_port": "Registrar SIP port",
+          "local_ip": "This host's IP (empty = auto-derive)",
+          "serial": "Device serial",
+          "listen_port": "Local SIP port",
+          "rtsp_port": "Local RTSP talkback port",
+          "door_user": "Door ISAPI/RTSP user",
+          "door_password": "Door ISAPI/RTSP password",
+          "provider": "SIP provider (Linphone/PBX)",
+          "sip_host": "Provider host",
+          "sip_port": "Provider port",
+          "sip_user": "Provider user",
+          "sip_pass": "Provider password",
+          "sip_target": "Ring target for incoming calls (empty = all account devices)",
+          "sip_domain": "Provider domain in the REGISTER",
+          "sip_srtp": "Offer SRTP to the provider",
+          "inbound_target": "Intercom extension to ring when called via SIP (empty = the main indoor station)",
+          "fritz": "Fritz!Box trunk",
+          "fritz_host": "Fritz!Box host",
+          "fritz_port": "Fritz!Box SIP port",
+          "fritz_domain": "Registrar domain in the fritz REGISTER",
+          "fritz_user": "Fritz!Box SIP user",
+          "fritz_pass": "Fritz!Box SIP password",
+          "fritz_target": "Number to ring on the fritzfon"
+        }
+      }
     }
   },
   "entity": {
     "binary_sensor": {
       "doorbell_ringing": {
         "name": "Doorbell ringing"
+      },
+      "intercom_registration": {
+        "name": "Intercom registration"
+      },
+      "provider_registration": {
+        "name": "Provider registration"
+      },
+      "fritz_registration": {
+        "name": "Fritz!Box registration"
       }
     },
     "sensor": {
@@ -85,6 +141,12 @@
       },
       "hangup": {
         "name": "Hang up"
+      },
+      "reboot_door": {
+        "name": "Reboot door station"
+      },
+      "unlock_door": {
+        "name": "Unlock door"
       }
     }
   },

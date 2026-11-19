@@ -50,6 +50,52 @@ async def test_services_are_safe_noops_without_calls(hass, runtime):
     await hass.services.async_call(DOMAIN, SERVICE_HANGUP_CALL, {}, blocking=True)
 
 
+async def test_reboot_door_button_puts_isapi_reboot(hass, runtime):
+    from unittest.mock import MagicMock, patch
+
+    class _Resp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Session:
+        put = None
+
+        def __init__(self, *a, **kw):
+            self.put = MagicMock(return_value=_Resp())
+            _Session.put = self.put
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    entity = hass.states.get("button.vdm10_test_reboot_door_station")
+    assert entity is not None and entity.state != "unavailable"
+    with patch("aiohttp.ClientSession", _Session):
+        await hass.services.async_call(
+            "button", "press", {"entity_id": "button.vdm10_test_reboot_door_station"}, blocking=True
+        )
+    assert _Session.put is not None
+    assert _Session.put.call_args.args[0] == "http://127.0.0.1:80/ISAPI/System/reboot"
+
+
+async def test_unlock_door_button_calls_isapi_open(hass, runtime):
+    from unittest.mock import MagicMock, patch
+
+    opener = MagicMock(return_value=True)
+    entity = hass.states.get("button.vdm10_test_unlock_door")
+    assert entity is not None and entity.state != "unavailable"
+    with patch("metzler.station.door_unlock.isapi_open_door", opener):
+        await hass.services.async_call("button", "press", {"entity_id": "button.vdm10_test_unlock_door"}, blocking=True)
+    assert opener.call_args.args[:4] == ("127.0.0.1", "admin", "doorpw", 1)
+
+
 async def test_mic_feed_reaches_the_rtsp_queue(hass, runtime):
     """talk-path plumbing: frames pushed by HA surface in the library's mic feed"""
     await fire_ring(runtime)

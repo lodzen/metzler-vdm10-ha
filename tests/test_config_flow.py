@@ -23,13 +23,14 @@ from custom_components.vdm10.const import (
 )
 
 # minimal submit on the manual step - everything else is derived
-# (rtsp_port 554 is privileged in this env - override like the old tests did)
+# (rtsp_port 554 is privileged and listen_port 5060 can be held by a running
+# dev instance on this host - the bind check rejects both, so override)
 MANUAL_MIN = {
     CONF_REGISTRAR_HOST: "127.0.0.1",
     CONF_USERNAME: "10000000003",
     CONF_PASSWORD: "pw",
     CONF_DOOR_HOST: "127.0.0.1",
-    "advanced": {"rtsp_port": 8554},
+    "advanced": {"rtsp_port": 8554, "listen_port": 55060},
 }
 
 
@@ -38,6 +39,31 @@ def _no_docker():
     """these tests assume host networking - pin docker_detected off; the docker
     cases patch it back to True locally."""
     with patch("custom_components.vdm10.config_flow._docker", return_value=False):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _sip_ok():
+    """config-flow tests never run real SIP probes - the registrar/provider
+    status checks get a canned success; the status tests override locally."""
+    with patch(
+        "custom_components.vdm10.config_flow._sip_statuses",
+        return_value={"registrar": 200},
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _no_setup():
+    """config-flow tests never run real entry setup - CREATE_ENTRY would start
+    a Vdm10Runtime (station thread + poll timer) that lingers past teardown.
+    A stub runtime keeps async_unload_entry working on the mocked entry."""
+
+    async def _setup(_hass, entry):
+        entry.runtime_data = AsyncMock()
+        return True
+
+    with patch("custom_components.vdm10.async_setup_entry", side_effect=_setup):
         yield
 
 
@@ -91,7 +117,7 @@ async def test_advanced_overrides_win(hass, socket_enabled):
                 "advanced": {
                     "local_ip": "127.0.0.1",
                     "serial": "OVERRIDE1",
-                    "listen_port": 5060,
+                    "listen_port": 55060,
                     "rtsp_port": 8554,
                     "door_password": "doorsecret",
                 },
@@ -112,6 +138,10 @@ async def test_discover_prefills_manual_form(hass, socket_enabled):
         patch(
             "custom_components.vdm10.config_flow._free_extension",
             return_value="10000000002",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._local_ip_for",
+            return_value="10.0.0.96",
         ),
     ):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "discover"})
@@ -168,17 +198,22 @@ async def test_docker_skips_scan_and_asks_local_ip(hass, socket_enabled):
 
 
 async def test_docker_local_ip_required_then_accepted(hass, socket_enabled):
+    """docker mode: local_ip required only when auto-derive fails (unroutable
+    registrar); an explicit value is then accepted as-is."""
     with patch("custom_components.vdm10.config_flow._docker", return_value=True):
         flow_id = await _go_manual(hass)
-        result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
+        with patch(
+            "custom_components.vdm10.config_flow._local_ip_for",
+            side_effect=OSError("no route"),
+        ):
+            result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
         assert result["type"] is FlowResultType.FORM
         assert result["errors"][CONF_LOCAL_IP] == "required"
-        with patch("custom_components.vdm10.station.HaStation.async_start", new=AsyncMock()):
-            result = await hass.config_entries.flow.async_configure(
-                result["flow_id"], {**MANUAL_MIN, CONF_LOCAL_IP: "10.0.0.123"}
-            )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**MANUAL_MIN, CONF_LOCAL_IP: "127.0.0.1"}
+        )
         assert result["type"] is FlowResultType.CREATE_ENTRY
-        assert result["data"][CONF_LOCAL_IP] == "10.0.0.123"
+        assert result["data"][CONF_LOCAL_IP] == "127.0.0.1"
 
 
 async def test_provider_fields_landed_in_entry(hass, socket_enabled):
@@ -226,10 +261,12 @@ def test_build_options_maps_provider_and_fritz():
         "fritz_user": "620",
         "fritz_pass": "fpw",
         "fritz_target": "**9",
+        "inbound_target": "10000000001",
     }
     o = build_options(data)
     assert o.sip_host == "sip.linphone.org"
     assert o.fritz and o.fritz_target
+    assert o.inbound_target == "10000000001"
 
 
 def test_build_options_no_provider_stays_ha_only():
@@ -239,11 +276,164 @@ def test_build_options_no_provider_stays_ha_only():
     assert not o.sip_host and not o.fritz
 
 
+async def test_options_flow_stores_a_full_flat_entry(hass, mock_entry, socket_enabled):
+    await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+    result = await hass.config_entries.options.async_init(mock_entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "registrar_host": "127.0.0.1",
+            "username": "10000000003",
+            "password": "pw",
+            "provider": {"inbound_target": "10000000001"},
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert mock_entry.options["inbound_target"] == "10000000001"
+    assert mock_entry.options["registrar_host"] == "127.0.0.1"  # _flatten produced a full entry dict
+
+
+def test_build_options_derives_main_station_as_inbound_default():
+    from custom_components.vdm10.station import build_options
+
+    # trunk configured, no inbound_target -> ring the main indoor directly on
+    # :5060 (the registrar can't route a call to its own number)
+    o = build_options({**ENTRY_DATA, "listen_port": 5060, "rtsp_port": 8554, CONF_SIP_HOST: "pbx.lan"})
+    assert o.inbound_target == "10000000000@127.0.0.1"
+
+
 async def test_duplicate_serial_host_aborts(hass, mock_entry, socket_enabled):
     flow_id = await _go_manual(hass)
     result = await hass.config_entries.flow.async_configure(
         flow_id,
-        {**MANUAL_MIN, "advanced": {"rtsp_port": 8554, "serial": ENTRY_DATA[CONF_SERIAL]}},
+        {
+            **MANUAL_MIN,
+            "advanced": {**MANUAL_MIN["advanced"], "serial": ENTRY_DATA[CONF_SERIAL]},
+        },
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_manual_empty_fields_auto_detect(hass, socket_enabled):
+    """username/door_host left empty -> the submit probes the registrar for the
+    next free slot and scans the LAN for the outdoor station."""
+    flow_id = await _go_manual(hass)
+    submit = {**MANUAL_MIN, CONF_USERNAME: "", CONF_DOOR_HOST: ""}
+    with (
+        patch(
+            "custom_components.vdm10.config_flow._free_extension",
+            return_value="10000000002",
+        ) as probe,
+        patch(
+            "custom_components.vdm10.config_flow._door_host",
+            return_value="10.0.0.48",
+        ) as door,
+        patch("custom_components.vdm10.station.HaStation.async_start", new=AsyncMock()),
+    ):
+        result = await hass.config_entries.flow.async_configure(flow_id, submit)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_USERNAME] == "10000000002"
+    assert result["data"][CONF_DOOR_HOST] == "10.0.0.48"
+    probe.assert_called_once_with("127.0.0.1")
+    door.assert_called_once()
+
+
+async def test_manual_extension_undetectable(hass, socket_enabled):
+    flow_id = await _go_manual(hass)
+    submit = {**MANUAL_MIN, CONF_USERNAME: ""}
+    with patch("custom_components.vdm10.config_flow._free_extension", return_value=None):
+        result = await hass.config_entries.flow.async_configure(flow_id, submit)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"][CONF_USERNAME] == "cannot_detect_extension"
+
+
+async def test_manual_door_undetectable(hass, socket_enabled):
+    flow_id = await _go_manual(hass)
+    submit = {**MANUAL_MIN, CONF_DOOR_HOST: ""}
+    with patch("custom_components.vdm10.config_flow._door_host", return_value=None):
+        result = await hass.config_entries.flow.async_configure(flow_id, submit)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"][CONF_DOOR_HOST] == "cannot_detect_door"
+
+
+async def test_sip_status_success_creates_entry(hass, socket_enabled):
+    """a successful registrar probe (200) plus provider/fritz 2xx -> entry"""
+    flow_id = await _go_manual(hass)
+    with patch(
+        "custom_components.vdm10.config_flow._sip_statuses",
+        return_value={"registrar": 200, "provider": 200, "fritz": 200},
+    ) as probe:
+        result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    probe.assert_called_once()
+
+
+async def test_sip_status_extension_conflict(hass, socket_enabled):
+    flow_id = await _go_manual(hass)
+    with patch(
+        "custom_components.vdm10.config_flow._sip_statuses",
+        return_value={"registrar": 410},
+    ):
+        result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"][CONF_USERNAME] == "extension_conflict"
+
+
+async def test_sip_status_registrar_unreachable(hass, socket_enabled):
+    flow_id = await _go_manual(hass)
+    with patch(
+        "custom_components.vdm10.config_flow._sip_statuses",
+        return_value={"registrar": None},
+    ):
+        result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"][CONF_REGISTRAR_HOST] == "cannot_connect"
+
+
+async def test_sip_status_provider_invalid_auth(hass, socket_enabled):
+    flow_id = await _go_manual(hass)
+    with patch(
+        "custom_components.vdm10.config_flow._sip_statuses",
+        return_value={"registrar": 200, "provider": 403},
+    ):
+        result = await hass.config_entries.flow.async_configure(flow_id, MANUAL_MIN)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["provider"] == "invalid_auth"
+
+
+async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
+    """DHCP event on the registrar's MAC: the unit's role is probed, the LAN
+    scan fills the outdoor station, and the next free slot is probed - the
+    manual form opens with every field derived."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    info = DhcpServiceInfo(ip="10.0.0.38", hostname="vdm10-indoor", macaddress="bc9b5e01cab7")
+    with (
+        patch(
+            "custom_components.vdm10.config_flow._probe_role",
+            return_value="registrar",
+        ) as role,
+        patch(
+            "custom_components.vdm10.config_flow._run_discovery",
+            return_value=DISCOVERY_RESULT,
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._free_extension",
+            return_value="10000000002",
+        ) as probe,
+        patch(
+            "custom_components.vdm10.config_flow._local_ip_for",
+            return_value="10.0.0.96",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "manual"
+    role.assert_called_once_with("10.0.0.38")
+    probe.assert_called_once_with("10.0.0.38")
+    markers = {k.schema: k for k in result["data_schema"].schema}
+    assert markers[CONF_REGISTRAR_HOST].default() == "10.0.0.38"
+    assert markers[CONF_USERNAME].default() == "10000000002"
+    assert markers[CONF_DOOR_HOST].default() == "10.0.0.48"
