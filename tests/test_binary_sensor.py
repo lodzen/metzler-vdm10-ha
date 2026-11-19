@@ -118,6 +118,18 @@ async def test_intercom_registration_tracks_the_registrar(hass, runtime):
     assert hass.states.get("binary_sensor.vdm10_test_intercom_registration").state == "on"
 
 
+async def test_intercom_registration_exposes_diagnostics(hass, runtime):
+    """last_error + active_calls ride on the intercom leg (the removed status
+    sensor used to carry them); trunk legs get no attributes"""
+    entity = hass.states.get("binary_sensor.vdm10_test_intercom_registration")
+    assert entity.attributes["last_error"] is None
+    assert entity.attributes["active_calls"] == 0
+    await fire_ring(runtime)
+    runtime._poll_registration(None)
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.vdm10_test_intercom_registration").attributes["active_calls"] == 1
+
+
 async def test_trunk_entities_only_exist_when_configured(hass, runtime):
     # ENTRY_DATA configures no provider/fritz -> those legs get no entity
     assert hass.states.get("binary_sensor.vdm10_test_provider_registration") is None
@@ -128,6 +140,7 @@ async def test_provider_registration_entity(hass, provider_runtime):
     entity = hass.states.get("binary_sensor.vdm10_test_provider_registration")
     assert entity is not None
     assert entity.state == "off"  # trunk configured, dead port -> not registered
+    assert "active_calls" not in entity.attributes  # diagnostics live on the intercom leg
 
 
 async def test_fritz_registration_entity_from_options_only(hass, socket_enabled):

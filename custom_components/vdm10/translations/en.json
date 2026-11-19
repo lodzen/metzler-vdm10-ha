@@ -125,11 +125,6 @@
         "name": "Fritz!Box registration"
       }
     },
-    "sensor": {
-      "status": {
-        "name": "Intercom status"
-      }
-    },
     "camera": {
       "door": {
         "name": "Door camera"

@@ -91,6 +91,15 @@ class Vdm10RegistrationSensor(BinarySensorEntity):
         return bool(self._leg(self.runtime))
 
     @property
+    def extra_state_attributes(self) -> dict:
+        if self._attr_translation_key != "intercom_registration":
+            return {}
+        return {
+            "last_error": self.runtime.last_error,
+            "active_calls": len(self.runtime.sessions),
+        }
+
+    @property
     def available(self) -> bool:
         return self.runtime.station is not None
 
