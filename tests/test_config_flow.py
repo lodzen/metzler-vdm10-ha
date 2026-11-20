@@ -1,5 +1,6 @@
 """Config flow: menu -> discover/manual, derived values, provider sections."""
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,7 +26,7 @@ from custom_components.vdm10.const import (
 # minimal submit on the manual step - everything else is derived
 # (rtsp_port 554 is privileged and listen_port 5060 can be held by a running
 # dev instance on this host - the bind check rejects both, so override)
-MANUAL_MIN = {
+MANUAL_MIN: dict[str, Any] = {
     CONF_REGISTRAR_HOST: "127.0.0.1",
     CONF_USERNAME: "10000000003",
     CONF_PASSWORD: "pw",

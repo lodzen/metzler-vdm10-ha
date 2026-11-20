@@ -14,7 +14,22 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from . import vendor as _vendor_loader  # noqa: F401 - MUST run before `import metzler`
-from .const import DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL
+
+# go2rtc compiles every module into its binary; HA's managed config only
+# enables a hardcoded subset (no isapi). Adding "isapi" to the module list
+# makes the Hikvision two-way-audio backchannel scheme available on the
+# embedded instance. Depends on HA internals - safe if the import or the
+# attribute ever moves: the integration just loses talkback again.
+try:
+    from homeassistant.components.go2rtc import server as _go2rtc_server
+
+    if "isapi" not in _go2rtc_server._APP_MODULES:
+        _go2rtc_server._APP_MODULES = (*_go2rtc_server._APP_MODULES, "isapi")  # ty: ignore[invalid-assignment]
+        _go2rtc_server._UI_APP_MODULES = (*_go2rtc_server._APP_MODULES, "debug")
+except (ImportError, AttributeError):
+    pass
+
+from .const import CONF_DOOR_HOST, DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL
 from .coordinator import Vdm10Runtime
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +47,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> boo
     entry.async_on_unload(entry.add_update_listener(_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass)
+    cfg = {**entry.data, **entry.options}
+    if cfg.get(CONF_DOOR_HOST):
+        from .go2rtc import async_configure
+
+        entry.async_create_background_task(hass, async_configure(hass, runtime), "vdm10_go2rtc")
     return True
 
 

@@ -11,14 +11,15 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import Vdm10ConfigEntry
 from .const import CONF_FRITZ_HOST, CONF_SIP_HOST, DOMAIN
-from .coordinator import Vdm10Runtime
+from .coordinator import RingSession, Vdm10Runtime
 
 
 async def async_setup_entry(hass, entry: Vdm10ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     runtime = entry.runtime_data
     cfg = {**entry.data, **entry.options}  # options-flow values land in .options
     entities: list[BinarySensorEntity] = [
-        DoorbellRingSensor(runtime),
+        RingSensor(runtime, door=True),
+        RingSensor(runtime, door=False),
         Vdm10RegistrationSensor(runtime, "intercom_registration", lambda r: r.registered),
     ]
     if cfg.get(CONF_SIP_HOST):
@@ -28,18 +29,20 @@ async def async_setup_entry(hass, entry: Vdm10ConfigEntry, async_add_entities: A
     async_add_entities(entities)
 
 
-class DoorbellRingSensor(BinarySensorEntity):
-    """on while the door/intercom call is ringing (early); an established call
-    is answered - it no longer 'rings'. Unavailable while unregistered."""
+class RingSensor(BinarySensorEntity):
+    """on while a call is ringing (early); an established call is answered -
+    it no longer 'rings'. door=True is the outdoor station's doorbell call,
+    door=False an indoor room-station call. Unavailable while unregistered."""
 
     _attr_has_entity_name = True
-    _attr_translation_key = "doorbell_ringing"
     _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
-    _attr_icon = "mdi:doorbell-video"
 
-    def __init__(self, runtime: Vdm10Runtime) -> None:
+    def __init__(self, runtime: Vdm10Runtime, door: bool) -> None:
         self.runtime = runtime
-        self._attr_unique_id = f"vdm10_{runtime.serial}_doorbell"
+        self._door = door
+        self._attr_translation_key = "doorbell_ringing" if door else "indoor_ringing"
+        self._attr_unique_id = f"vdm10_{runtime.serial}_{'doorbell' if door else 'indoor_ringing'}"
+        self._attr_icon = "mdi:doorbell-video" if door else "mdi:phone-ring"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, runtime.serial)},
             name=runtime.entry.title,
@@ -48,8 +51,12 @@ class DoorbellRingSensor(BinarySensorEntity):
         )
 
     @property
+    def _sess(self) -> RingSession | None:
+        return self.runtime.door_ringing if self._door else self.runtime.indoor_ringing
+
+    @property
     def is_on(self) -> bool:
-        return self.runtime.ringing_call is not None
+        return self._sess is not None
 
     @property
     def available(self) -> bool:
@@ -57,7 +64,7 @@ class DoorbellRingSensor(BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        sess = self.runtime.ringing_call
+        sess = self._sess
         return {"caller": sess.caller, "call_id": sess.call_id} if sess else {}
 
     async def async_added_to_hass(self) -> None:

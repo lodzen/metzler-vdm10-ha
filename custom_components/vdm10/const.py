@@ -18,6 +18,7 @@ CONF_DOOR_HOST = "door_host"  # outdoor station IP (camera stream)
 CONF_DOOR_USER = "door_user"  # door ISAPI/RTSP login (Basic auth)
 CONF_DOOR_PASSWORD = "door_password"
 CONF_ADVANCED = "advanced"  # collapsed section: ports/serial overrides
+CONF_PRELOAD_STREAM = "preload_stream"  # keep the door stream hot in go2rtc (fast start, idle cost)
 CONF_PROVIDER = "provider"  # collapsed section: optional SIP trunk (Linphone/PBX)
 CONF_FRITZ = "fritz"  # collapsed section: optional Fritz trunk
 

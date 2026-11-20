@@ -43,6 +43,7 @@ from .const import (
     CONF_LISTEN_PORT,
     CONF_LOCAL_IP,
     CONF_PASSWORD,
+    CONF_PRELOAD_STREAM,
     CONF_PROVIDER,
     CONF_REGISTRAR_HOST,
     CONF_REGISTRAR_PORT,
@@ -223,6 +224,7 @@ def _manual_schema(prefill: dict, ask_local_ip: bool = False) -> vol.Schema:
         vol.Optional(CONF_RTSP_PORT, default=adv.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)): PORT,
         vol.Optional(CONF_DOOR_USER, default=adv.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)): str,
         vol.Optional(CONF_DOOR_PASSWORD, default=adv.get(CONF_DOOR_PASSWORD, "")): str,
+        vol.Optional(CONF_PRELOAD_STREAM, default=adv.get(CONF_PRELOAD_STREAM, False)): bool,
     }
     if not ask_local_ip:
         advanced[vol.Optional(CONF_LOCAL_IP, default=adv.get(CONF_LOCAL_IP, ""))] = str
@@ -457,6 +459,7 @@ def _options_schema(flat: dict) -> vol.Schema:
                         vol.Optional(CONF_RTSP_PORT, default=flat.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)): PORT,
                         vol.Optional(CONF_DOOR_USER, default=flat.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)): str,
                         vol.Optional(CONF_DOOR_PASSWORD, default=flat.get(CONF_DOOR_PASSWORD, "")): str,
+                        vol.Optional(CONF_PRELOAD_STREAM, default=flat.get(CONF_PRELOAD_STREAM, False)): bool,
                     }
                 ),
                 {"collapsed": True},
@@ -509,6 +512,7 @@ def _flatten(user_input: dict) -> dict:
         CONF_RTSP_PORT: adv.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT),
         CONF_DOOR_USER: adv.get(CONF_DOOR_USER, DEFAULT_DOOR_USER),
         CONF_DOOR_PASSWORD: adv.get(CONF_DOOR_PASSWORD) or user_input[CONF_PASSWORD],
+        CONF_PRELOAD_STREAM: bool(adv.get(CONF_PRELOAD_STREAM, False)),
     }
     data.update(user_input.get(CONF_PROVIDER) or {})
     data.update(user_input.get(CONF_FRITZ) or {})

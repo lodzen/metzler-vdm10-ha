@@ -89,6 +89,16 @@ class Vdm10Runtime:
         return next((s for s in self.sessions.values() if s.state == "early"), None)
 
     @property
+    def door_ringing(self) -> RingSession | None:
+        """early call originated by the outdoor station (doorbell press)"""
+        return next((s for s in self.sessions.values() if s.state == "early" and s.door), None)
+
+    @property
+    def indoor_ringing(self) -> RingSession | None:
+        """early call involving an indoor room station (extension call)"""
+        return next((s for s in self.sessions.values() if s.state == "early" and not s.door), None)
+
+    @property
     def active_call(self) -> RingSession | None:
         return self.ringing_call or next(iter(self.sessions.values()), None)
 

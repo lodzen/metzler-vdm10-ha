@@ -22,14 +22,22 @@ dev = [
     "pytest==9.0.3",
     "pytest-homeassistant==2026.11.1",
     "ruff>=0.17.3,<0.18",
-    "ty>=0.0.95,<0.0.96",
-    "complexipy>=4.2,<5",
+    "ty>=0.0.107,<0.1",
     "pyturbojpeg>=2.6.1",
+    # optional HA component dep (not pulled in by the homeassistant package);
+    # our go2rtc module + tests import it
+    "go2rtc-client",
 ]
+# complexipy publishes no cp314 wheel; it is a pure syntax tool that does not
+# import the codebase, so it runs standalone: uvx --python 3.13 complexipy
+tools = ["complexipy>=4.2,<5"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# load the HA harness before entrypoint plugins so its httpx2 alias installs
+# before respx's plugin module imports httpx
+addopts = "-p pytest_homeassistant"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
@@ -68,9 +76,11 @@ include = ["custom_components", "tests"]
 exclude = ["custom_components/vdm10/vendor/metzler"]
 
 [tool.ty.environment]
-root = [".", "./tests"]
+# .venv is auto-discovered by ty; the vendor dir lets `import metzler` resolve
+# to the built vendored copy (excluded from checking itself, above)
+root = [".", "./tests", "./custom_components/vdm10/vendor"]
 
 [tool.ty.rules]
 # HA entities declare writable _attr_* attributes that platforms override with
 # read-only properties by design - the override check can't model that pattern
-invalid-property-type-override = "ignore"
+incompatible-property-override = "ignore"

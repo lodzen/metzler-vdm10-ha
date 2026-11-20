@@ -35,6 +35,7 @@
           "rtsp_port": "Local RTSP talkback port",
           "door_user": "Door ISAPI/RTSP user",
           "door_password": "Door ISAPI/RTSP password (defaults to extension password)",
+          "preload_stream": "Preload the camera stream (faster start, keeps the door streaming in standby)",
           "provider": "SIP provider (Linphone/PBX, optional - host/user/pass suffice, rest is derived)",
           "sip_host": "Provider host (e.g. sip.linphone.org)",
           "sip_port": "Provider port",
@@ -90,6 +91,7 @@
           "rtsp_port": "Local RTSP talkback port",
           "door_user": "Door ISAPI/RTSP user",
           "door_password": "Door ISAPI/RTSP password",
+          "preload_stream": "Preload the camera stream (faster start, keeps the door streaming in standby)",
           "provider": "SIP provider (Linphone/PBX)",
           "sip_host": "Provider host",
           "sip_port": "Provider port",
@@ -114,6 +116,9 @@
     "binary_sensor": {
       "doorbell_ringing": {
         "name": "Doorbell ringing"
+      },
+      "indoor_ringing": {
+        "name": "Indoor ringing"
       },
       "intercom_registration": {
         "name": "Intercom registration"

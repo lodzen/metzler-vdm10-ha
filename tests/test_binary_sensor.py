@@ -3,7 +3,7 @@
 import pytest
 from pytest_homeassistant.common import MockConfigEntry
 
-from conftest import ENTRY_DATA, fire_ring
+from conftest import ENTRY_DATA, fire_indoor_ring, fire_provider_call, fire_ring
 from custom_components.vdm10.const import CONF_SIP_HOST, EVENT_ANSWERED, EVENT_CALL_ENDED, EVENT_RING
 
 
@@ -52,6 +52,39 @@ async def test_ring_turns_sensor_on_and_fires_event(hass, runtime):
     assert state.attributes["call_id"] == "doorcall1"
     assert len(events) == 1 and events[0].data["call_id"] == "doorcall1"
     assert events[0].data["door"] is True
+
+
+async def test_indoor_ring_lights_only_the_indoor_sensor(hass, runtime):
+    """an extension call is not a doorbell: doorbell_ringing stays off,
+    indoor_ringing turns on instead"""
+    runtime.station.station.registered.set()
+    runtime._poll_registration(None)
+    await fire_indoor_ring(runtime)
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.vdm10_test_doorbell_ringing").state == "off"
+    indoor = hass.states.get("binary_sensor.vdm10_test_indoor_ringing")
+    assert indoor is not None and indoor.state == "on"
+    assert indoor.attributes["caller"] == "10000000000"
+    # and a door call lights only the doorbell sensor
+    runtime.station.station._close_call(runtime.station.station.calls["indoorcall1"], "indoorcall1")
+    await fire_ring(runtime)
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.vdm10_test_doorbell_ringing").state == "on"
+    assert hass.states.get("binary_sensor.vdm10_test_indoor_ringing").state == "off"
+
+
+async def test_inbound_provider_call_lights_indoor_ringing(hass, provider_runtime):
+    """a SIP-side caller ringing the indoor is an indoor ring, not a doorbell:
+    regression - inbound provider calls never fired a ring event"""
+    runtime = provider_runtime
+    runtime.station.station.registered.set()
+    runtime._poll_registration(None)
+    await fire_provider_call(runtime)
+    await hass.async_block_till_done()
+    assert hass.states.get("binary_sensor.vdm10_test_doorbell_ringing").state == "off"
+    indoor = hass.states.get("binary_sensor.vdm10_test_indoor_ringing")
+    assert indoor.state == "on"
+    assert indoor.attributes["caller"] == "alice"
 
 
 async def test_cancel_ends_ring_best_effort_answered_elsewhere(hass, runtime):
