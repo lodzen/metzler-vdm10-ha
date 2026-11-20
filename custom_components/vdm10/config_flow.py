@@ -271,6 +271,13 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._prefill: dict = {}
+        self._docker_env: bool | None = None
+
+    async def _is_docker(self) -> bool:
+        """cached; the filesystem probe runs in the executor."""
+        if self._docker_env is None:
+            self._docker_env = await self.hass.async_add_executor_job(_docker)
+        return self._docker_env
 
     async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="user", menu_options=["discover", "manual"])
@@ -304,9 +311,9 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_discover(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
-        if user_input is None and _docker():
+        if user_input is None and await self._is_docker():
             # container IP is useless for a subnet scan - ask for the host IP
-            return self._show_manual(self._prefill, {"base": "docker_detected"})
+            return await self._show_manual(self._prefill, {"base": "docker_detected"})
         if user_input is None:
             found = await self.hass.async_add_executor_job(_run_discovery)
             registrar_opts = found["registrars"] + found["candidates"] + [DISCOVER_MANUAL]
@@ -339,12 +346,12 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
                 pass
         if door != DISCOVER_MANUAL:
             self._prefill[CONF_DOOR_HOST] = door
-        return self._show_manual(self._prefill, {})
+        return await self._show_manual(self._prefill, {})
 
     async def async_step_manual(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            if _docker() and not str(user_input.get(CONF_LOCAL_IP) or "").strip():
+            if await self._is_docker() and not str(user_input.get(CONF_LOCAL_IP) or "").strip():
                 # host-networked containers derive fine; only NAT'd bridges
                 # (or no route) still need the host's LAN IP typed in
                 try:
@@ -359,22 +366,22 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
                     user_input[CONF_LOCAL_IP] = ""
                 if not user_input[CONF_LOCAL_IP]:
                     errors[CONF_LOCAL_IP] = "required"
-                    return self._show_manual(user_input, errors)
+                    return await self._show_manual(user_input, errors)
             return await self._finish(user_input, errors)
-        return self._show_manual(self._prefill, errors)
+        return await self._show_manual(self._prefill, errors)
 
     async def _finish(self, user_input: dict, errors: dict) -> ConfigFlowResult:
         data = _flatten(user_input)
         if not data[CONF_REGISTRAR_HOST]:
             errors[CONF_REGISTRAR_HOST] = "required"
-            return self._show_manual(user_input, errors)
+            return await self._show_manual(user_input, errors)
         if not data[CONF_LOCAL_IP]:
             try:
                 data[CONF_LOCAL_IP] = await self.hass.async_add_executor_job(
                     _local_ip_for, data[CONF_REGISTRAR_HOST], data[CONF_REGISTRAR_PORT]
                 )
             except OSError:
-                return self._show_manual(user_input, {"base": "cannot_reach"})
+                return await self._show_manual(user_input, {"base": "cannot_reach"})
         if not data[CONF_USERNAME]:
             if ext := await self.hass.async_add_executor_job(_free_extension, data[CONF_REGISTRAR_HOST]):
                 data[CONF_USERNAME] = ext
@@ -386,12 +393,12 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 errors[CONF_DOOR_HOST] = "cannot_detect_door"
         if errors:
-            return self._show_manual(user_input, errors)
+            return await self._show_manual(user_input, errors)
         data[CONF_SERIAL] = data[CONF_SERIAL] or _serial_for(data[CONF_REGISTRAR_HOST], data[CONF_USERNAME])
         if bad := await self.hass.async_add_executor_job(
             _check_bind, data[CONF_LOCAL_IP], data[CONF_LISTEN_PORT], data[CONF_RTSP_PORT]
         ):
-            return self._show_manual(user_input, {bad: "cannot_bind"})
+            return await self._show_manual(user_input, {bad: "cannot_bind"})
         statuses = await self.hass.async_add_executor_job(_sip_statuses, data)
         reg = statuses["registrar"]
         if reg is None:
@@ -411,13 +418,13 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             elif not 200 <= code < 300:
                 errors[leg] = "register_rejected"
         if errors:
-            return self._show_manual(user_input, errors)
+            return await self._show_manual(user_input, errors)
         await self.async_set_unique_id(f"{data[CONF_SERIAL]}@{data[CONF_REGISTRAR_HOST]}")
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=data[CONF_NAME] or f"VDM10 {data[CONF_USERNAME]}", data=data)
 
-    def _show_manual(self, user_input: dict, errors: dict) -> ConfigFlowResult:
-        schema = _manual_schema(user_input, ask_local_ip=_docker())
+    async def _show_manual(self, user_input: dict, errors: dict) -> ConfigFlowResult:
+        schema = _manual_schema(user_input, ask_local_ip=await self._is_docker())
         return self.async_show_form(step_id="manual", data_schema=schema, errors=errors)
 
     @staticmethod
