@@ -293,10 +293,21 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    _scan_fut = None  # executor Future shared across concurrent flow instances
+
     def __init__(self) -> None:
         self._prefill: dict = {}
         self._docker_env: bool | None = None
         self._natted: bool | None = None
+
+    async def _scan(self) -> dict:
+        """one in-flight LAN scan shared across concurrent flow instances -
+        a DHCP event per unit (door + indoors fire together) or a manual
+        retry must not each stampede the subnet."""
+        cls = type(self)
+        if cls._scan_fut is None or cls._scan_fut.done():
+            cls._scan_fut = self.hass.async_add_executor_job(_run_discovery)
+        return await cls._scan_fut
 
     async def _is_docker(self) -> bool:
         """cached; the filesystem probe runs in the executor."""
@@ -343,7 +354,7 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         except OSError:
             pass
-        found = await self.hass.async_add_executor_job(_run_discovery)
+        found = await self._scan()
         if not self._flow_alive():
             return self.async_abort(reason="closed")
         if found["doors"]:
@@ -362,7 +373,7 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             # NAT'd bridge IPs are useless for a subnet scan - ask the host IP
             return await self._show_manual(self._prefill, {"base": "docker_detected"})
         if user_input is None:
-            found = await self.hass.async_add_executor_job(_run_discovery)
+            found = await self._scan()
             if not self._flow_alive():
                 return self.async_abort(reason="closed")
             registrar_opts = found["registrars"] + found["candidates"] + [DISCOVER_MANUAL]

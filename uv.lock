@@ -2747,7 +2747,7 @@ wheels = [
 
 [[package]]
 name = "vdm10-ha"
-version = "0.1.5"
+version = "0.1.6"
 source = { virtual = "." }
 dependencies = [
     { name = "vdm10-python" },
@@ -2784,14 +2784,14 @@ tools = [{ name = "complexipy", specifier = ">=4.2,<5" }]
 
 [[package]]
 name = "vdm10-python"
-version = "0.1.1"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/13/2e29f99eea84127c7e8a984fd77cbdafb8b85c3bcb70b0f6e19bf24e8a52/vdm10_python-0.1.1.tar.gz", hash = "sha256:a9d615dc6cdd08d4e49135ca3d45b8ad29396f41a9a11513aff5cac5de4d2416", size = 74464, upload-time = "2026-11-20T11:05:57.168Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/8b/5d00496b1cf57e13c18a793fb3924ef89b2a15eae851bcdb4bdc280b86e0/vdm10_python-0.1.4.tar.gz", hash = "sha256:31ddcd1d6c72774e9c280b61f6f714fa2f99b838faa0bc9b871e2b9aa148944f", size = 75536, upload-time = "2026-11-20T11:52:45.273Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/94/cbcd542be9341011409735e87dcab03de3b077b8d235ec2c6fa5771922d5/vdm10_python-0.1.1-py3-none-any.whl", hash = "sha256:5dddde3df6be12f22daefe55fb0b4dc389a00080d681f632aca2204ab340e6f7", size = 87250, upload-time = "2026-11-20T11:05:55.831Z" },
+    { url = "https://files.pythonhosted.org/packages/65/85/3c030a5b1a7bd61757184f21078ea94b19009769b196873b48e96a496e26/vdm10_python-0.1.4-py3-none-any.whl", hash = "sha256:9a5cdb1a943aee6cd1d7b4499b02c30c429ee52d98849e28ffe620c2fa309833", size = 88350, upload-time = "2026-11-20T11:52:43.917Z" },
 ]
 
 [[package]]
