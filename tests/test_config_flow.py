@@ -480,6 +480,58 @@ async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
     assert markers[CONF_DOOR_HOST].default() == "10.0.0.48"
 
 
+async def test_dhcp_tile_aborts_when_entry_exists(hass, mock_entry, socket_enabled):
+    """a DHCP event for the already-configured registrar must not recreate a
+    tile under 'Entdeckt' - the entry match aborts before any probing."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    info = DhcpServiceInfo(ip=ENTRY_DATA[CONF_REGISTRAR_HOST], hostname="vdm10-indoor", macaddress="bc9b5e01cab7")
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_dhcp_tile_dies_when_entry_is_created(hass, socket_enabled):
+    """a tile opened while no entry existed must disappear once an entry is
+    created - HA auto-aborts default-discovery-unique-id flows when a real
+    unique id lands."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    info = DhcpServiceInfo(ip="10.0.0.38", hostname="vdm10-indoor", macaddress="bc9b5e01cab7")
+    with (
+        patch(
+            "custom_components.vdm10.config_flow._probe_role",
+            return_value="registrar",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._is_main_indoor",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._run_discovery",
+            return_value=DISCOVERY_RESULT,
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._free_extension",
+            return_value="10000000002",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._local_ip_for",
+            return_value="10.0.0.96",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.FORM
+    tile_flow_id = result["flow_id"]
+    assert tile_flow_id in hass.config_entries.flow._progress
+
+    manual_id = await _go_manual(hass)
+    with patch("custom_components.vdm10.station.HaStation.async_start", new=AsyncMock()):
+        res = await hass.config_entries.flow.async_configure(manual_id, MANUAL_MIN)
+    assert res["type"] is FlowResultType.CREATE_ENTRY
+    assert tile_flow_id not in hass.config_entries.flow._progress
+
+
 async def test_dhcp_door_station_is_suppressed(hass, socket_enabled):
     """a DHCP match on the outdoor station (ISAPI on :80) must not create a
     discovery tile - only the main indoor can host the entry."""

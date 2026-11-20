@@ -21,7 +21,12 @@ import logging
 import socket
 
 import probatio as vol  # HA's voluptuous fork; data_schema wants probatio.Schema
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    DEFAULT_DISCOVERY_UNIQUE_ID,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
@@ -344,6 +349,10 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         suppressed. The LAN scan then fills the door + free extension."""
         self._async_abort_entries_match({CONF_REGISTRAR_HOST: discovery_info.ip})
         self.context["title_placeholders"] = {"host": discovery_info.ip}
+        # sentinel unique id: repeated dhcp events collapse into one tile, and
+        # the tile is auto-aborted the moment any entry lands a real unique id
+        await self.async_set_unique_id(DEFAULT_DISCOVERY_UNIQUE_ID)
+        self._abort_if_unique_id_configured()
         role = await self.hass.async_add_executor_job(_probe_role, discovery_info.ip)
         if role == "door" or not await self.hass.async_add_executor_job(_is_main_indoor, discovery_info.ip):
             return self.async_abort(reason="not_main_indoor")

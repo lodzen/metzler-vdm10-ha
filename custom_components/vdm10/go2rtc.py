@@ -96,6 +96,13 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
         streams = await client.streams.list()
         existing = streams.get(identifier)
         known = {p.url for p in existing.producers} if existing else set()
+        _LOGGER.debug(
+            "go2rtc stream %s: isapi=%s, producers=%s, existing=%s",
+            identifier,
+            "isapi" in schemes,
+            [p.split("@")[-1] if "@" in p else p.split(":")[0] for p in producers],
+            [k.split("@")[-1] if "@" in k else k for k in sorted(known)],
+        )
         if known != set(producers):
             await client.streams.add(identifier, producers)
     except Exception:
