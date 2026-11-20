@@ -28,8 +28,10 @@ Issues = "https://github.com/lodzen/metzler-vdm10-ha/issues"
 [tool.uv]
 package = false
 
-[tool.uv.sources]
-vdm10-python = { path = "../metzler-vdm10", editable = true }
+# metzler resolves from PyPI (vdm10-python). For local development against an
+# unpublished library checkout, re-enable:
+# [tool.uv.sources]
+# vdm10-python = { path = "../metzler-vdm10", editable = true }
 
 [dependency-groups]
 dev = [

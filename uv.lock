@@ -2768,7 +2768,7 @@ tools = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "vdm10-python", editable = "../metzler-vdm10" }]
+requires-dist = [{ name = "vdm10-python" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2785,19 +2785,13 @@ tools = [{ name = "complexipy", specifier = ">=4.2,<5" }]
 [[package]]
 name = "vdm10-python"
 version = "0.1.0"
-source = { editable = "../metzler-vdm10" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
 ]
-
-[package.metadata]
-requires-dist = [{ name = "cryptography", specifier = ">=44" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1,<9.2" },
-    { name = "ruff", specifier = ">=0.17.3,<0.18" },
-    { name = "ty", specifier = ">=0.0.107,<0.1" },
+sdist = { url = "https://files.pythonhosted.org/packages/11/78/bd7be1198107f184fbad661f65a62271f483cb46a9ee3352010a17e0428e/vdm10_python-0.1.0.tar.gz", hash = "sha256:97dd0e3ddb8367211847f76b1754c7796eab330dc19f9a6dbd1fa5b9cc726bc4", size = 73218, upload-time = "2026-11-20T10:22:16.336Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e4/38/066c08743a5f42265cbea5a54b3085f273d422a5a5a87917136b1c4ccc1b/vdm10_python-0.1.0-py3-none-any.whl", hash = "sha256:d429eb1afe4ef62825bb764b87275026dd0c927a8ae89b414cac5a30faa024a0", size = 85993, upload-time = "2026-11-20T10:22:14.977Z" },
 ]
 
 [[package]]

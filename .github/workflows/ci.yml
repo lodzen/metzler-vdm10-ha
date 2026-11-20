@@ -1,8 +1,6 @@
 # CI: pytest on real Home Assistant, ruff lint + format check, ty type check.
-# metzler comes from source — the lodzen/metzler-vdm10 repo, same-named
-# branch when it exists there, else its default branch — because
-# pyproject.toml sources it editable at ../metzler-vdm10. The clone is
-# symlinked into that sibling slot before `uv sync` resolves it.
+# metzler resolves from PyPI as the `vdm10-python` package — the vendored copy
+# under custom_components/vdm10/vendor is what ty checks against.
 name: CI
 permissions:
   contents: read
@@ -21,16 +19,6 @@ jobs:
       with:
         python-version: "3.14"
         enable-cache: true
-    - name: Clone metzler-vdm10 source
-      run: |
-        BRANCH="${{ github.head_ref || github.ref_name }}"
-        if git ls-remote --exit-code --heads https://github.com/lodzen/metzler-vdm10.git "$BRANCH" >/dev/null 2>&1; then
-          git clone --depth 1 --branch "$BRANCH" https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
-        else
-          git clone --depth 1 https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
-        fi
-    - name: Point the editable source at the clone
-      run: ln -sfn "$RUNNER_TEMP/metzler-vdm10" "$GITHUB_WORKSPACE/../metzler-vdm10"
     - name: Install dependencies
       run: uv sync
     - name: Test with pytest
@@ -45,16 +33,6 @@ jobs:
       with:
         python-version: "3.14"
         enable-cache: true
-    - name: Clone metzler-vdm10 source
-      run: |
-        BRANCH="${{ github.head_ref || github.ref_name }}"
-        if git ls-remote --exit-code --heads https://github.com/lodzen/metzler-vdm10.git "$BRANCH" >/dev/null 2>&1; then
-          git clone --depth 1 --branch "$BRANCH" https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
-        else
-          git clone --depth 1 https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
-        fi
-    - name: Point the editable source at the clone
-      run: ln -sfn "$RUNNER_TEMP/metzler-vdm10" "$GITHUB_WORKSPACE/../metzler-vdm10"
     - name: Install dependencies and tools
       run: uv sync
     - name: Ruff lint

@@ -149,6 +149,10 @@ declares `homeassistant: 2026.11.0` as the install minimum (the camera's
   discovery while an entry is active can be unreliable; the form falls back to
   manual entry.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=lodzen/metzler-vdm10-ha&type=date&logscale&legend=top-left)](https://www.star-history.com/#lodzen/metzler-vdm10-ha&type=date&logscale&legend=top-left)
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GPL-3.0-only — see [LICENSE](LICENSE).
