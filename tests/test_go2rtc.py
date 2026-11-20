@@ -131,6 +131,39 @@ async def test_isapi_recheck_rewrites_stream_when_module_lands(hass, runtime, mo
     assert any(s.startswith("isapi://") for s in sources)
 
 
+async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
+    """go2rtc masks producer credentials ('***'), so HA's lazy
+    _update_stream_source rewrite always fires for credentialed cameras and
+    drops the isapi backchannel - the Streams.add wrapper re-appends it on
+    every rewrite of our stream and leaves other streams untouched."""
+    api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
+    _rest_client(monkeypatch, api)
+    hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
+    import custom_components.vdm10.go2rtc as g
+
+    await g.async_configure(hass, runtime)
+    name = "vdm10_vdm10_Q12345678_door_camera"
+    isapi = g._ISAPI_STREAMS[name]
+
+    captured = []
+
+    class _Base:
+        async def request(self, method, path, params=None):
+            captured.append(params["src"])
+
+    import go2rtc_client.rest as _rest
+
+    client = _rest._StreamClient(_Base())
+    await client.add(name, ["rtsp://u:p@door/ch", f"ffmpeg:{name}#audio=opus"])
+    assert captured[-1] == ["rtsp://u:p@door/ch", f"ffmpeg:{name}#audio=opus", isapi]
+    await client.add("other_stream", ["rtsp://x"])
+    assert captured[-1] == ["rtsp://x"]
+
+    g.forget_stream(runtime)
+    await client.add(name, ["rtsp://u:p@door/ch"])
+    assert captured[-1] == ["rtsp://u:p@door/ch"]
+
+
 async def test_no_go2rtc_is_a_noop(hass, runtime, monkeypatch):
     hass.data.pop("go2rtc", None)
     import custom_components.vdm10.go2rtc as g
@@ -143,6 +176,7 @@ async def test_api_failure_is_swallowed(hass, runtime, monkeypatch):
     """go2rtc up but the API not listening yet - the exception is swallowed
     and the background isapi watcher is armed so the backchannel can still
     land once the process is reachable."""
+
     class _Boom:
         async def list(self):
             raise RuntimeError("api down")

@@ -48,6 +48,49 @@ _GO2RTC_HASS_KEY = "go2rtc"
 _WAIT_SECONDS = 90
 _POLL_INTERVAL = 2
 
+# stream identifier -> isapi producer url, for streams whose backchannel must
+# survive HA's own producer rewrites (see _patch_streams_add)
+_ISAPI_STREAMS: dict[str, str] = {}
+_STREAMS_ADD_PATCHED = False
+
+
+def _patch_streams_add() -> None:
+    """Re-append our isapi producer to HA's own stream rewrites.
+
+    go2rtc's ``/api/streams`` masks credentials in producer urls (``***``), so
+    ``_update_stream_source``'s ``stream_source == producer.url`` check never
+    matches a credentialed camera - every WebRTC offer and go2rtc still then
+    rewrites the producers as plain ``[rtsp, ffmpeg]``, dropping the isapi
+    backchannel on the very session that needs it. Wrapping ``_StreamClient.add``
+    re-appends it on every rewrite of a registered stream; a no-op for any
+    stream that isn't ours."""
+    global _STREAMS_ADD_PATCHED
+    if _STREAMS_ADD_PATCHED:
+        return
+    try:
+        from go2rtc_client import rest as _rest
+    except ImportError:
+        return
+    orig_add = _rest._StreamClient.add
+
+    async def _add(self, name, sources):
+        isapi = _ISAPI_STREAMS.get(name)
+        if isapi is not None:
+            if isinstance(sources, str):
+                sources = [sources]
+            if not any(s.startswith("isapi://") for s in sources):
+                sources = [*sources, isapi]
+        return await orig_add(self, name, sources)
+
+    _rest._StreamClient.add = _add
+    _STREAMS_ADD_PATCHED = True
+
+
+def forget_stream(runtime) -> None:
+    """drop the entry's isapi registration on unload - the wrapper keyed on
+    this identifier must not outlive the runtime that owns it."""
+    _ISAPI_STREAMS.pop(f"vdm10_vdm10_{runtime.serial}_door_camera", None)
+
 
 def _door_rtsp_url(runtime) -> str:
     cfg = {**runtime.entry.data, **runtime.entry.options}
@@ -102,6 +145,8 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
         if "isapi" in schemes:
             producers.append(_isapi_url(runtime))
             needs_isapi_retry = False
+            _patch_streams_add()
+            _ISAPI_STREAMS[identifier] = _isapi_url(runtime)
         # streams.add REPLACES the producer list - always write the full set.
         # HA's own _update_stream_source then finds the rtsp url present and
         # never rewrites, so the isapi producer survives later offers.
@@ -167,6 +212,8 @@ def _schedule_isapi_retry(hass: HomeAssistant, runtime, client, identifier: str)
                     _isapi_url(runtime),
                 ]
                 await client.streams.add(identifier, producers)
+                _patch_streams_add()
+                _ISAPI_STREAMS[identifier] = _isapi_url(runtime)
                 _LOGGER.info("go2rtc stream %s: isapi module appeared - talkback enabled", identifier)
                 return
             except Exception:

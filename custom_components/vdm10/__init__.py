@@ -64,6 +64,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> bo
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         await entry.runtime_data.async_stop()
+        from .go2rtc import forget_stream
+
+        forget_stream(entry.runtime_data)
         if not hass.config_entries.async_loaded_entries(DOMAIN):
             for service in (SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL):
                 hass.services.async_remove(DOMAIN, service)
