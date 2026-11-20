@@ -150,6 +150,11 @@
       "unlock_door": {
         "name": "Unlock door"
       }
+    },
+    "event": {
+      "doorbell": {
+        "name": "Doorbell"
+      }
     }
   },
   "services": {

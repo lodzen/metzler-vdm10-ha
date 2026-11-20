@@ -4,7 +4,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "vdm10"
 
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.CAMERA]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.CAMERA, Platform.EVENT]
 
 CONF_REGISTRAR_HOST = "registrar_host"
 CONF_REGISTRAR_PORT = "registrar_port"
