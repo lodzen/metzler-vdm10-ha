@@ -68,31 +68,70 @@ try:
 
     _orig_send_doorbell = _alexa_state_report.async_send_doorbell_event_message
 
-    async def _send_doorbell(hass: HomeAssistant, config: AbstractConfig, alexa_entity: AlexaEntity) -> None:
-        # a DoorbellPress must carry the endpointId of the device that holds
-        # the video - our door camera lives on the same device entry as the
-        # vdm10 doorbell event entity
+    def _door_camera_alexa_entity(
+        hass: HomeAssistant, config: AbstractConfig, event_entity_id: str
+    ) -> AlexaEntity | None:
+        """a DoorbellPress must carry the endpointId of the device that holds
+        the video - our door camera lives on the same device entry as the
+        vdm10 doorbell event entity"""
         reg = _er.async_get(hass)
-        entry = reg.async_get(alexa_entity.entity_id)
-        if entry is not None and entry.platform == DOMAIN and entry.device_id:
-            cam_id = next(
-                (
-                    e.entity_id
-                    for e in reg.entities.values()
-                    if e.device_id == entry.device_id and e.unique_id.endswith("_door_camera")
-                ),
-                None,
-            )
-            if cam_id is not None and (cam_state := hass.states.get(cam_id)) is not None:
-                alexa_entity = ENTITY_ADAPTERS["camera"](hass, config, cam_state)
+        entry = reg.async_get(event_entity_id)
+        if entry is None or entry.platform != DOMAIN or not entry.device_id:
+            return None
+        cam_id = next(
+            (
+                e.entity_id
+                for e in reg.entities.values()
+                if e.device_id == entry.device_id and e.unique_id.endswith("_door_camera")
+            ),
+            None,
+        )
+        if cam_id is None or (cam_state := hass.states.get(cam_id)) is None:
+            return None
+        return ENTITY_ADAPTERS["camera"](hass, config, cam_state)
+
+    async def _send_doorbell(hass: HomeAssistant, config: AbstractConfig, alexa_entity: AlexaEntity) -> None:
+        if adapter := _door_camera_alexa_entity(hass, config, alexa_entity.entity_id):
+            alexa_entity = adapter
+        assert _orig_send_doorbell is not None
         await _orig_send_doorbell(hass, config, alexa_entity)
 
     _alexa_state_report.async_send_doorbell_event_message = _send_doorbell  # ty: ignore[invalid-assignment]
 except (ImportError, AttributeError):
-    pass
+    _orig_send_doorbell = None
 
-from .const import CONF_DOOR_HOST, DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL
-from .coordinator import Vdm10Runtime
+
+def _alexa_smart_home_config(hass: HomeAssistant) -> AbstractConfig | None:
+    """the YAML AlexaConfig is retained only on the SmartHomeView route
+    handler - nothing in hass.data references it"""
+    if _orig_send_doorbell is None:
+        return None
+    try:
+        for resource in hass.http.app.router.resources():
+            for route in resource:
+                view = getattr(getattr(route, "handler", None), "__self__", None)
+                if type(view).__name__ == "SmartHomeView":
+                    return getattr(view, "smart_home_config", None)
+    except (AttributeError, RuntimeError, TypeError):
+        pass
+    return None
+
+
+async def _async_fire_doorbell_press(hass: HomeAssistant, event_entity_id: str) -> None:
+    """one-endpoint mode: when the doorbell event entity is NOT Alexa-exposed
+    HA's state listener skips it entirely, so the press is sent straight onto
+    the door camera endpoint (which carries the video). When it IS exposed
+    the patched listener path above already delivers it."""
+    config = _alexa_smart_home_config(hass)
+    if config is None or config.should_expose(event_entity_id):
+        return
+    if adapter := _door_camera_alexa_entity(hass, config, event_entity_id):
+        assert _orig_send_doorbell is not None
+        await _orig_send_doorbell(hass, config, adapter)
+
+
+from .const import CONF_DOOR_HOST, DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL  # noqa: E402
+from .coordinator import Vdm10Runtime  # noqa: E402 - imports metzler: must run after `vendor` above
 
 _LOGGER = logging.getLogger(__name__)
 

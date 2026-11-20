@@ -105,3 +105,46 @@ async def test_doorbell_press_redirects_to_camera_endpoint(hass, runtime, monkey
     event_adapter = ENTITY_ADAPTERS["event"](hass, config, _state(hass))
     await vdm10._send_doorbell(hass, config, event_adapter)
     assert sent == ["camera.vdm10_test_door_camera"]
+
+
+async def test_direct_press_when_event_not_exposed(hass, runtime, monkeypatch):
+    """unexposed trigger: we send DoorbellPress ourselves to the camera -
+    the one-endpoint setup (Scrypted-style) where the event entity does
+    not appear in Alexa at all"""
+    from types import SimpleNamespace
+
+    import custom_components.vdm10 as vdm10
+
+    sent = []
+
+    async def _spy(hass, config, alexa_entity):
+        sent.append(alexa_entity.entity_id)
+
+    config = SimpleNamespace(
+        should_expose=lambda entity_id: False,
+        entity_config={},
+        generate_alexa_id=lambda entity_id: entity_id,
+    )
+    monkeypatch.setattr(vdm10, "_alexa_smart_home_config", lambda hass: config)
+    monkeypatch.setattr(vdm10, "_orig_send_doorbell", _spy)
+    await vdm10._async_fire_doorbell_press(hass, _ENTITY)
+    assert sent == ["camera.vdm10_test_door_camera"]
+
+
+async def test_no_direct_press_when_event_exposed(hass, runtime, monkeypatch):
+    """exposed trigger: HA's listener path delivers it, we stay out - no
+    duplicate press"""
+    from types import SimpleNamespace
+
+    import custom_components.vdm10 as vdm10
+
+    sent = []
+
+    async def _spy(hass, config, alexa_entity):
+        sent.append(alexa_entity.entity_id)
+
+    config = SimpleNamespace(should_expose=lambda entity_id: True, entity_config={})
+    monkeypatch.setattr(vdm10, "_alexa_smart_home_config", lambda hass: config)
+    monkeypatch.setattr(vdm10, "_orig_send_doorbell", _spy)
+    await vdm10._async_fire_doorbell_press(hass, _ENTITY)
+    assert sent == []

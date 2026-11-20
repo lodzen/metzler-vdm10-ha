@@ -15,7 +15,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import Vdm10ConfigEntry
+from . import Vdm10ConfigEntry, _async_fire_doorbell_press
 from .const import DOMAIN
 from .coordinator import Vdm10Runtime
 
@@ -52,10 +52,16 @@ class Vdm10DoorbellEvent(EventEntity):
 
     @callback
     def _handle_runtime_update(self) -> None:
+        fired = False
         sess = self.runtime.door_ringing
         if sess is None:
             self._seen_call_id = None
         elif sess.call_id != self._seen_call_id:
             self._seen_call_id = sess.call_id
             self._trigger_event(EVENT_PRESS, {"caller": sess.caller, "call_id": sess.call_id})
+            fired = True
         self.async_write_ha_state()  # also tracks availability flips
+        if fired:
+            # when this entity is Alexa-exposed the (patched) state listener
+            # delivers the press - this task only covers the unexposed case
+            self.hass.async_create_task(_async_fire_doorbell_press(self.hass, self.entity_id))
