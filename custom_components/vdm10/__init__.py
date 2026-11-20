@@ -92,6 +92,11 @@ try:
 
     async def _send_doorbell(hass: HomeAssistant, config: AbstractConfig, alexa_entity: AlexaEntity) -> None:
         if adapter := _door_camera_alexa_entity(hass, config, alexa_entity.entity_id):
+            _LOGGER.debug(
+                "doorbell press from %s redirected to %s",
+                alexa_entity.entity_id,
+                adapter.entity_id,
+            )
             alexa_entity = adapter
         assert _orig_send_doorbell is not None
         await _orig_send_doorbell(hass, config, alexa_entity)
@@ -123,11 +128,18 @@ async def _async_fire_doorbell_press(hass: HomeAssistant, event_entity_id: str) 
     the door camera endpoint (which carries the video). When it IS exposed
     the patched listener path above already delivers it."""
     config = _alexa_smart_home_config(hass)
-    if config is None or config.should_expose(event_entity_id):
+    if config is None:
+        _LOGGER.debug("doorbell press %s: no Alexa smart_home config reachable", event_entity_id)
+        return
+    if config.should_expose(event_entity_id):
+        _LOGGER.debug("doorbell press %s: entity exposed, listener path owns it", event_entity_id)
         return
     if adapter := _door_camera_alexa_entity(hass, config, event_entity_id):
+        _LOGGER.debug("doorbell press %s -> %s (direct)", event_entity_id, adapter.entity_id)
         assert _orig_send_doorbell is not None
         await _orig_send_doorbell(hass, config, adapter)
+    else:
+        _LOGGER.debug("doorbell press %s: door camera not resolvable", event_entity_id)
 
 
 from .const import CONF_DOOR_HOST, DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL  # noqa: E402
