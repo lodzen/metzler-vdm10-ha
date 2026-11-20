@@ -1,0 +1,65 @@
+# CI: pytest on real Home Assistant, ruff lint + format check, ty type check.
+# metzler comes from source — the lodzen/metzler-vdm10 repo, same-named
+# branch when it exists there, else its default branch — because
+# pyproject.toml sources it editable at ../metzler-vdm10. The clone is
+# symlinked into that sibling slot before `uv sync` resolves it.
+name: CI
+permissions:
+  contents: read
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up uv + Python
+      # pytest-homeassistant requires >=3.14.2; HA 2026.11 runs on it.
+      uses: astral-sh/setup-uv@v10
+      with:
+        python-version: "3.14"
+        enable-cache: true
+    - name: Clone metzler-vdm10 source
+      run: |
+        BRANCH="${{ github.head_ref || github.ref_name }}"
+        if git ls-remote --exit-code --heads https://github.com/lodzen/metzler-vdm10.git "$BRANCH" >/dev/null 2>&1; then
+          git clone --depth 1 --branch "$BRANCH" https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
+        else
+          git clone --depth 1 https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
+        fi
+    - name: Point the editable source at the clone
+      run: ln -sfn "$RUNNER_TEMP/metzler-vdm10" "$GITHUB_WORKSPACE/../metzler-vdm10"
+    - name: Install dependencies
+      run: uv sync
+    - name: Test with pytest
+      run: uv run pytest
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up uv + Python
+      uses: astral-sh/setup-uv@v10
+      with:
+        python-version: "3.14"
+        enable-cache: true
+    - name: Clone metzler-vdm10 source
+      run: |
+        BRANCH="${{ github.head_ref || github.ref_name }}"
+        if git ls-remote --exit-code --heads https://github.com/lodzen/metzler-vdm10.git "$BRANCH" >/dev/null 2>&1; then
+          git clone --depth 1 --branch "$BRANCH" https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
+        else
+          git clone --depth 1 https://github.com/lodzen/metzler-vdm10.git "$RUNNER_TEMP/metzler-vdm10"
+        fi
+    - name: Point the editable source at the clone
+      run: ln -sfn "$RUNNER_TEMP/metzler-vdm10" "$GITHUB_WORKSPACE/../metzler-vdm10"
+    - name: Install dependencies and tools
+      run: uv sync
+    - name: Ruff lint
+      run: uv run ruff check .
+    - name: Ruff format check
+      run: uv run ruff format --check .
+    - name: Type check with ty
+      run: uv run ty check
