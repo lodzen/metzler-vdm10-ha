@@ -102,22 +102,44 @@ try:
         await _orig_send_doorbell(hass, config, alexa_entity)
 
     _alexa_state_report.async_send_doorbell_event_message = _send_doorbell  # ty: ignore[invalid-assignment]
+
+    # the direct-send path needs the YAML AlexaConfig, which HA retains only
+    # inside the SmartHomeView's route-handler closure - capture it at
+    # construction time instead (covers alexa setting up AFTER us; the router
+    # scan below covers the reverse order)
+    from homeassistant.components.alexa.smart_home import AlexaConfig as _AlexaYamlConfig
+
+    _orig_alexa_config_init = _AlexaYamlConfig.__init__
+
+    def _alexa_config_init(self, hass, config):
+        _orig_alexa_config_init(self, hass, config)
+        _ALEXA_CONFIGS[hass] = self
+
+    _AlexaYamlConfig.__init__ = _alexa_config_init
 except (ImportError, AttributeError):
     _orig_send_doorbell = None
 
+_ALEXA_CONFIGS: dict = {}
+
 
 def _alexa_smart_home_config(hass: HomeAssistant) -> AbstractConfig | None:
-    """the YAML AlexaConfig is retained only on the SmartHomeView route
-    handler - nothing in hass.data references it"""
+    """the YAML AlexaConfig object - captured on construction, or recovered
+    from request_handler_factory's closure (the route handler is the wrapped
+    ``handle()``, so the view is a closure cell, not ``__self__``)"""
     if _orig_send_doorbell is None:
         return None
+    if (cfg := _ALEXA_CONFIGS.get(hass)) is not None:
+        return cfg
     try:
         for resource in hass.http.app.router.resources():
             for route in resource:
-                view = getattr(getattr(route, "handler", None), "__self__", None)
-                if type(view).__name__ == "SmartHomeView":
-                    return getattr(view, "smart_home_config", None)
-    except (AttributeError, RuntimeError, TypeError):
+                handler = getattr(route, "handler", None)
+                for cell in getattr(handler, "__closure__", None) or ():
+                    cfg = getattr(cell.cell_contents, "smart_home_config", None)
+                    if cfg is not None:
+                        _ALEXA_CONFIGS[hass] = cfg
+                        return cfg
+    except (AttributeError, RuntimeError, TypeError, ValueError):
         pass
     return None
 

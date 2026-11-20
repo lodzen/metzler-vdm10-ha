@@ -148,3 +148,16 @@ async def test_no_direct_press_when_event_exposed(hass, runtime, monkeypatch):
     monkeypatch.setattr(vdm10, "_orig_send_doorbell", _spy)
     await vdm10._async_fire_doorbell_press(hass, _ENTITY)
     assert sent == []
+
+
+async def test_alexa_config_captured_on_construction(hass, runtime):
+    """the __init__ patch must retain the YAML AlexaConfig for the direct
+    doorbell path - on prod the SmartHomeView wraps it in a route closure"""
+    from homeassistant.components.alexa.smart_home import AlexaConfig
+
+    import custom_components.vdm10 as vdm10
+
+    vdm10._ALEXA_CONFIGS.pop(hass, None)
+    cfg = AlexaConfig(hass, {"endpoint": "http://localhost", "filter": {}})
+    assert vdm10._ALEXA_CONFIGS.get(hass) is cfg
+    assert vdm10._alexa_smart_home_config(hass) is cfg
