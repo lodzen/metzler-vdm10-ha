@@ -183,11 +183,12 @@ async def test_discover_nothing_found_still_shows_form(hass, socket_enabled):
 
 
 async def test_docker_skips_scan_and_asks_local_ip(hass, socket_enabled):
-    """container detected -> 'Search the network' bounces to manual with the
-    host-IP question; the subnet scan never runs"""
+    """container with a NAT'd egress IP -> 'Search the network' bounces to
+    manual with the host-IP question; the subnet scan never runs"""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     with (
         patch("custom_components.vdm10.config_flow._docker", return_value=True),
+        patch("custom_components.vdm10.config_flow._egress_ip", return_value="172.30.32.1"),
         patch("custom_components.vdm10.config_flow._run_discovery") as scan,
     ):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "discover"})
@@ -198,10 +199,45 @@ async def test_docker_skips_scan_and_asks_local_ip(hass, socket_enabled):
     assert markers.get(CONF_LOCAL_IP) == "Required"
 
 
+async def test_docker_host_networked_runs_scan(hass, socket_enabled):
+    """container with a real LAN egress IP (host networking, e.g. HAOS) -> the
+    subnet scan still runs and local_ip stays auto-derived in Advanced."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    with (
+        patch("custom_components.vdm10.config_flow._docker", return_value=True),
+        patch("custom_components.vdm10.config_flow._egress_ip", return_value="192.168.178.6"),
+        patch(
+            "custom_components.vdm10.config_flow._run_discovery",
+            return_value=DISCOVERY_RESULT,
+        ) as scan,
+        patch(
+            "custom_components.vdm10.config_flow._free_extension",
+            return_value="10000000002",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._local_ip_for",
+            return_value="192.168.178.6",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "discover"})
+        assert result["type"] is FlowResultType.FORM and result["step_id"] == "discover"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {"registrar_pick": "10.0.0.38", "door_pick": "10.0.0.48"},
+        )
+    assert result["type"] is FlowResultType.FORM and result["step_id"] == "manual"
+    scan.assert_called_once()
+    markers = {k.schema: type(k).__name__ for k in result["data_schema"].schema}
+    assert markers.get(CONF_LOCAL_IP) != "Required"
+
+
 async def test_docker_local_ip_required_then_accepted(hass, socket_enabled):
     """docker mode: local_ip required only when auto-derive fails (unroutable
     registrar); an explicit value is then accepted as-is."""
-    with patch("custom_components.vdm10.config_flow._docker", return_value=True):
+    with (
+        patch("custom_components.vdm10.config_flow._docker", return_value=True),
+        patch("custom_components.vdm10.config_flow._egress_ip", return_value="172.30.32.1"),
+    ):
         flow_id = await _go_manual(hass)
         with patch(
             "custom_components.vdm10.config_flow._local_ip_for",

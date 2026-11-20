@@ -194,18 +194,28 @@ def _looks_natted(ip: str) -> bool:
 
 
 def _docker() -> bool:
-    """container runtime -> derived IPs are the NAT'd bridge address; the user
-    must tell us the host's real LAN IP."""
+    """running inside a container runtime (docker, containerd, podman, ...)."""
     from metzler import discovery
 
     return discovery.docker_detected()
 
 
+def _egress_ip() -> str:
+    """executor: the source IP a LAN scan/derive would use - the NAT'd bridge
+    address in bridge-mode containers, the real LAN IP with host networking
+    or on bare metal; '' when there's no route at all."""
+    try:
+        return _local_ip_for("10.0.0.1", 80)
+    except OSError:
+        return ""
+
+
 def _manual_schema(prefill: dict, ask_local_ip: bool = False) -> vol.Schema:
     """the manual/field form; ``prefill`` carries values found by discovery.
 
-    ``local_ip`` is auto-derived on a normal host (hidden in Advanced) but
-    becomes a required top-level field inside containers (docker_detected).
+    ``local_ip`` is auto-derived when the egress IP is usable (hidden in
+    Advanced) but becomes a required top-level field when it isn't (NAT'd
+    container bridges).
     """
     adv = prefill.get(CONF_ADVANCED, {})
     fields = {
@@ -272,12 +282,21 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._prefill: dict = {}
         self._docker_env: bool | None = None
+        self._natted: bool | None = None
 
     async def _is_docker(self) -> bool:
         """cached; the filesystem probe runs in the executor."""
         if self._docker_env is None:
             self._docker_env = await self.hass.async_add_executor_job(_docker)
         return self._docker_env
+
+    async def _container_natted(self) -> bool:
+        """container AND the egress IP is the NAT'd bridge address -> a subnet
+        scan is useless and local_ip can't be derived, so the host's LAN IP
+        must be asked for. Host-networked containers (HAOS) scan fine."""
+        if self._natted is None:
+            self._natted = await self._is_docker() and _looks_natted(await self.hass.async_add_executor_job(_egress_ip))
+        return self._natted
 
     async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="user", menu_options=["discover", "manual"])
@@ -311,8 +330,8 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_discover(self, user_input: dict | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
-        if user_input is None and await self._is_docker():
-            # container IP is useless for a subnet scan - ask for the host IP
+        if user_input is None and await self._container_natted():
+            # NAT'd bridge IPs are useless for a subnet scan - ask the host IP
             return await self._show_manual(self._prefill, {"base": "docker_detected"})
         if user_input is None:
             found = await self.hass.async_add_executor_job(_run_discovery)
@@ -424,7 +443,7 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=data[CONF_NAME] or f"VDM10 {data[CONF_USERNAME]}", data=data)
 
     async def _show_manual(self, user_input: dict, errors: dict) -> ConfigFlowResult:
-        schema = _manual_schema(user_input, ask_local_ip=await self._is_docker())
+        schema = _manual_schema(user_input, ask_local_ip=await self._container_natted())
         return self.async_show_form(step_id="manual", data_schema=schema, errors=errors)
 
     @staticmethod
