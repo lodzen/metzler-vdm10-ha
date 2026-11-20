@@ -83,13 +83,25 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
     client = Go2RtcRestClient(go2rtc_cfg.session, go2rtc_cfg.url)
     # get_camera_identifier: <platform_domain>_<entity unique_id>
     identifier = f"vdm10_vdm10_{runtime.serial}_door_camera"
+    needs_isapi_retry = True
     try:
-        schemes = await client.schemes.list()
+        # the entry reporting hass.data is set when its setup finishes, but the
+        # managed process may still be a few seconds from listening - retry
+        # briefly before falling back to the background isapi watcher.
+        for attempt in range(_SCHEMES_RETRY_ATTEMPTS):
+            try:
+                schemes = await client.schemes.list()
+                break
+            except Exception:
+                if attempt == _SCHEMES_RETRY_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(1)
         if "isapi" not in schemes and await _respawn_for_isapi(hass, go2rtc_cfg, client):
             schemes = await client.schemes.list()
         producers = [_door_rtsp_url(runtime), f"ffmpeg:{identifier}#audio=opus#query=log_level=debug"]
         if "isapi" in schemes:
             producers.append(_isapi_url(runtime))
+            needs_isapi_retry = False
         # streams.add REPLACES the producer list - always write the full set.
         # HA's own _update_stream_source then finds the rtsp url present and
         # never rewrites, so the isapi producer survives later offers.
@@ -107,13 +119,18 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
             await client.streams.add(identifier, producers)
         if "isapi" not in schemes:
             _LOGGER.warning(
-                "go2rtc has no isapi module - door talkback unavailable. "
-                "Stream %s runs camera-only; reload the entry to retry.",
+                "go2rtc has no isapi module yet - talkback unavailable; "
+                "stream %s runs camera-only while a background retry watches "
+                "for the module (~60s).",
                 identifier,
             )
-            _schedule_isapi_retry(hass, runtime, client, identifier)
     except Exception:
-        _LOGGER.warning("go2rtc stream setup failed", exc_info=True)
+        # e.g. the managed process was still starting and the API refused -
+        # HA's lazy producer write then leaves the stream camera-only, so the
+        # retry is the only path that adds the backchannel later.
+        _LOGGER.warning("go2rtc stream setup failed - will retry for isapi", exc_info=True)
+    if needs_isapi_retry:
+        _schedule_isapi_retry(hass, runtime, client, identifier)
     await _apply_preload(hass, runtime, client, identifier)
 
 
@@ -122,6 +139,7 @@ def _redact(url: str) -> str:
     return url.split("@", 1)[-1] if "@" in url else url.split(":", 1)[0]
 
 
+_SCHEMES_RETRY_ATTEMPTS = 10  # ~10s for the managed process to start listening
 _ISAPI_RECHECK_ATTEMPTS = 12  # ~60s total, covers a late watchdog respawn
 _ISAPI_RECHECK_INTERVAL = 5
 
@@ -136,21 +154,23 @@ def _schedule_isapi_retry(hass: HomeAssistant, runtime, client, identifier: str)
         for _ in range(_ISAPI_RECHECK_ATTEMPTS):
             await asyncio.sleep(_ISAPI_RECHECK_INTERVAL)
             try:
-                if "isapi" in await client.schemes.list():
-                    producers = [
-                        _door_rtsp_url(runtime),
-                        f"ffmpeg:{identifier}#audio=opus#query=log_level=debug",
-                        _isapi_url(runtime),
-                    ]
-                    streams = await client.streams.list()
-                    existing = streams.get(identifier)
-                    known = {p.url for p in existing.producers} if existing else set()
-                    if known != set(producers):
-                        await client.streams.add(identifier, producers)
-                    _LOGGER.info("go2rtc stream %s: isapi module appeared - talkback enabled", identifier)
-                    return
-            except Exception:
+                streams = await client.streams.list()
+                existing = streams.get(identifier)
+                known = {p.url for p in existing.producers} if existing else set()
+                if any(p.startswith("isapi://") for p in known):
+                    return  # already present - nothing to heal
+                if "isapi" not in await client.schemes.list():
+                    continue
+                producers = [
+                    _door_rtsp_url(runtime),
+                    f"ffmpeg:{identifier}#audio=opus#query=log_level=debug",
+                    _isapi_url(runtime),
+                ]
+                await client.streams.add(identifier, producers)
+                _LOGGER.info("go2rtc stream %s: isapi module appeared - talkback enabled", identifier)
                 return
+            except Exception:
+                continue  # transient API error - keep watching within the window
 
     hass.async_create_background_task(_recheck(), f"vdm10_isapi_recheck_{identifier}")
 

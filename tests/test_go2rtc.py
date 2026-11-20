@@ -140,6 +140,9 @@ async def test_no_go2rtc_is_a_noop(hass, runtime, monkeypatch):
 
 
 async def test_api_failure_is_swallowed(hass, runtime, monkeypatch):
+    """go2rtc up but the API not listening yet - the exception is swallowed
+    and the background isapi watcher is armed so the backchannel can still
+    land once the process is reachable."""
     class _Boom:
         async def list(self):
             raise RuntimeError("api down")
@@ -147,6 +150,10 @@ async def test_api_failure_is_swallowed(hass, runtime, monkeypatch):
     api = types.SimpleNamespace(schemes=_Boom())
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    from custom_components.vdm10.go2rtc import async_configure
+    import custom_components.vdm10.go2rtc as g
 
-    await async_configure(hass, runtime)  # must not raise
+    scheduled = []
+    monkeypatch.setattr(g, "_schedule_isapi_retry", lambda *a: scheduled.append(a))
+    monkeypatch.setattr(g, "_SCHEMES_RETRY_ATTEMPTS", 1)
+    await g.async_configure(hass, runtime)  # must not raise
+    assert len(scheduled) == 1
