@@ -29,6 +29,68 @@ try:
 except (ImportError, AttributeError):
     pass
 
+# Amazon links a doorbell's press to its camera only when ONE endpoint carries
+# both Alexa.DoorbellEventSource and a camera stream interface. HA never yields
+# DoorbellEventSource on cameras, and DoorbellPress only fires for
+# event/binary_sensor state transitions (a camera's state is never "on") - so a
+# doorbell entity and a camera entity can never merge natively. Two patches fix
+# that: the camera gets the interface when it is configured
+# display_categories: DOORBELL (same shape binary_sensor uses), and a press
+# coming from our doorbell event entity is redirected to the camera endpoint.
+try:
+    from collections.abc import Iterable
+
+    from homeassistant.components.alexa import entities as _alexa_entities
+    from homeassistant.components.alexa import state_report as _alexa_state_report
+    from homeassistant.components.alexa.capabilities import (
+        AlexaCapability,
+        AlexaDoorbellEventSource,
+    )
+    from homeassistant.components.alexa.config import AbstractConfig
+    from homeassistant.components.alexa.const import CONF_DISPLAY_CATEGORIES
+    from homeassistant.components.alexa.entities import (
+        ENTITY_ADAPTERS,
+        AlexaEntity,
+        DisplayCategory,
+    )
+
+    _orig_cam_interfaces = _alexa_entities.CameraCapabilities.interfaces
+
+    def _cam_interfaces(self) -> Iterable[AlexaCapability]:
+        yield from _orig_cam_interfaces(self)
+        conf = self.config.entity_config.get(self.entity.entity_id, {})
+        if conf.get(CONF_DISPLAY_CATEGORIES) == DisplayCategory.DOORBELL:
+            yield AlexaDoorbellEventSource(self.entity)
+
+    _alexa_entities.CameraCapabilities.interfaces = _cam_interfaces  # ty: ignore[invalid-assignment]
+
+    from homeassistant.helpers import entity_registry as _er
+
+    _orig_send_doorbell = _alexa_state_report.async_send_doorbell_event_message
+
+    async def _send_doorbell(hass: HomeAssistant, config: AbstractConfig, alexa_entity: AlexaEntity) -> None:
+        # a DoorbellPress must carry the endpointId of the device that holds
+        # the video - our door camera lives on the same device entry as the
+        # vdm10 doorbell event entity
+        reg = _er.async_get(hass)
+        entry = reg.async_get(alexa_entity.entity_id)
+        if entry is not None and entry.platform == DOMAIN and entry.device_id:
+            cam_id = next(
+                (
+                    e.entity_id
+                    for e in reg.entities.values()
+                    if e.device_id == entry.device_id and e.unique_id.endswith("_door_camera")
+                ),
+                None,
+            )
+            if cam_id is not None and (cam_state := hass.states.get(cam_id)) is not None:
+                alexa_entity = ENTITY_ADAPTERS["camera"](hass, config, cam_state)
+        await _orig_send_doorbell(hass, config, alexa_entity)
+
+    _alexa_state_report.async_send_doorbell_event_message = _send_doorbell  # ty: ignore[invalid-assignment]
+except (ImportError, AttributeError):
+    pass
+
 from .const import CONF_DOOR_HOST, DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL
 from .coordinator import Vdm10Runtime
 

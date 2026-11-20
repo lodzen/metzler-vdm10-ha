@@ -68,3 +68,40 @@ async def test_new_ring_after_end_refires(hass, runtime):
     state = _state(hass)
     assert state.state != first or state.attributes["call_id"] == "doorcall2"
     assert state.attributes["call_id"] == "doorcall2"
+
+
+async def test_camera_doorbell_config_yields_doorbell_interface(hass, runtime):
+    """a camera with display_categories DOORBELL gets DoorbellEventSource"""
+    from types import SimpleNamespace
+
+    from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
+
+    cam_state = hass.states.get("camera.vdm10_test_door_camera")
+    assert cam_state is not None
+    config = SimpleNamespace(
+        entity_config={cam_state.entity_id: {"display_categories": "DOORBELL"}},
+        should_expose=lambda entity_id: True,
+        generate_alexa_id=lambda entity_id: entity_id,
+    )
+    names = {iface.name() for iface in ENTITY_ADAPTERS["camera"](hass, config, cam_state).interfaces()}
+    assert "Alexa.DoorbellEventSource" in names
+
+
+async def test_doorbell_press_redirects_to_camera_endpoint(hass, runtime, monkeypatch):
+    """the sender must hand the camera adapter, not the event adapter"""
+    from types import SimpleNamespace
+
+    from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
+
+    import custom_components.vdm10 as vdm10
+
+    sent = []
+
+    async def _spy(hass, config, alexa_entity):
+        sent.append(alexa_entity.entity_id)
+
+    monkeypatch.setattr(vdm10, "_orig_send_doorbell", _spy)
+    config = SimpleNamespace(entity_config={})
+    event_adapter = ENTITY_ADAPTERS["event"](hass, config, _state(hass))
+    await vdm10._send_doorbell(hass, config, event_adapter)
+    assert sent == ["camera.vdm10_test_door_camera"]
