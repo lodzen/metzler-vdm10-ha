@@ -454,6 +454,10 @@ async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
             return_value="registrar",
         ) as role,
         patch(
+            "custom_components.vdm10.config_flow._is_main_indoor",
+            return_value=True,
+        ),
+        patch(
             "custom_components.vdm10.config_flow._run_discovery",
             return_value=DISCOVERY_RESULT,
         ),
@@ -474,3 +478,77 @@ async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
     assert markers[CONF_REGISTRAR_HOST].default() == "10.0.0.38"
     assert markers[CONF_USERNAME].default() == "10000000002"
     assert markers[CONF_DOOR_HOST].default() == "10.0.0.48"
+
+
+async def test_dhcp_door_station_is_suppressed(hass, socket_enabled):
+    """a DHCP match on the outdoor station (ISAPI on :80) must not create a
+    discovery tile - only the main indoor can host the entry."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    info = DhcpServiceInfo(ip="10.0.0.48", hostname="vdm10-door", macaddress="bc9b5e01cab8")
+    with patch(
+        "custom_components.vdm10.config_flow._probe_role",
+        return_value="door",
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_main_indoor"
+
+
+async def test_dhcp_extension_indoor_is_suppressed(hass, socket_enabled):
+    """an extension indoor (indoor role but silent on the :5065 registrar
+    fingerprint) is suppressed the same way - it can't host the entry."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    info = DhcpServiceInfo(ip="10.0.0.47", hostname="vdm10-ext", macaddress="bc9b5e01cab9")
+    with (
+        patch(
+            "custom_components.vdm10.config_flow._probe_role",
+            return_value="registrar",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._is_main_indoor",
+            return_value=False,
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_main_indoor"
+
+
+async def test_closed_flow_skips_remaining_probes(hass, socket_enabled):
+    """closing the dialog mid-scan can't kill the running executor job, but
+    the free-extension probe that would follow it is skipped."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    info = DhcpServiceInfo(ip="10.0.0.38", hostname="vdm10-indoor", macaddress="bc9b5e01cab7")
+
+    def close_and_scan():
+        flow_id = next(iter(hass.config_entries.flow._progress))
+        hass.config_entries.flow.async_abort(flow_id)
+        return DISCOVERY_RESULT
+
+    with (
+        patch(
+            "custom_components.vdm10.config_flow._probe_role",
+            return_value="registrar",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._is_main_indoor",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._run_discovery",
+            side_effect=close_and_scan,
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._free_extension",
+        ) as probe,
+        patch(
+            "custom_components.vdm10.config_flow._local_ip_for",
+            return_value="10.0.0.96",
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.ABORT
+    probe.assert_not_called()

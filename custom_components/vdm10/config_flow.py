@@ -96,7 +96,7 @@ def _run_discovery() -> dict:
     except OSError as err:
         # :5060 in use (a running entry) or no route - fall back to manual
         _LOGGER.debug("VDM10 discovery failed: %s", err)
-        return {"doors": [], "registrars": [], "candidates": []}
+        return {"doors": [], "registrars": [], "candidates": [], "vdm10_macs": {}}
 
 
 def _free_extension(registrar: str) -> str | None:
@@ -163,6 +163,20 @@ def _probe_role(ip: str) -> str:
         return "door"
     except OSError:
         return "registrar"
+
+
+def _is_main_indoor(ip: str) -> bool:
+    """executor: the registrar fingerprint - only the main indoor answers
+    :5065 REGISTERs; extension indoors stay silent. Probing the last slot
+    avoids touching the …00 AOR (the main's own number); any reply means a
+    registrar is present. Fail open on bind errors so a busy :5060 can
+    never suppress the tile."""
+    from metzler import discovery
+
+    try:
+        return discovery.registrar_probe(ip, ext=f"{discovery.EXT_BASE}5", timeout=2.0) is not None
+    except OSError:
+        return True
 
 
 def _check_bind(ip: str, listen_port: int, rtsp_port: int) -> str | None:
@@ -301,15 +315,28 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="user", menu_options=["discover", "manual"])
 
+    def _flow_alive(self) -> bool:
+        """the user can close the dialog mid-scan - a running executor job
+        can't be killed, but remaining probe stages can still be skipped.
+        (``async_get`` serializes the flow and raises on a mid-step one, so
+        check the manager's progress map directly.)"""
+        flow_id = getattr(self, "flow_id", None)
+        progress = getattr(self.hass.config_entries.flow, "_progress", None)
+        if flow_id is None or progress is None:
+            return True
+        return flow_id in progress
+
     async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> ConfigFlowResult:
-        """DHCP discovery (Hikvision OUI match): :80 probe decides whether the
-        found unit is the outdoor station (ISAPI) or an indoor (registrar).
-        The LAN scan then fills whatever we don't know yet - the missing
-        side, the next free extension, and this host's IP."""
+        """DHCP discovery (Hikvision OUI match): every VDM10 unit shares the
+        OUI, so the tile is only kept for the main indoor - door stations
+        (ISAPI on :80) and extension indoors (no :5065 registrar) are
+        suppressed. The LAN scan then fills the door + free extension."""
         self._async_abort_entries_match({CONF_REGISTRAR_HOST: discovery_info.ip})
         self.context["title_placeholders"] = {"host": discovery_info.ip}
         role = await self.hass.async_add_executor_job(_probe_role, discovery_info.ip)
-        self._prefill[CONF_DOOR_HOST if role == "door" else CONF_REGISTRAR_HOST] = discovery_info.ip
+        if role == "door" or not await self.hass.async_add_executor_job(_is_main_indoor, discovery_info.ip):
+            return self.async_abort(reason="not_main_indoor")
+        self._prefill[CONF_REGISTRAR_HOST] = discovery_info.ip
         try:
             self._prefill[CONF_LOCAL_IP] = await self.hass.async_add_executor_job(
                 _local_ip_for, discovery_info.ip, DEFAULT_REGISTRAR_PORT
@@ -317,15 +344,16 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         except OSError:
             pass
         found = await self.hass.async_add_executor_job(_run_discovery)
-        if not self._prefill.get(CONF_DOOR_HOST) and found["doors"]:
+        if not self._flow_alive():
+            return self.async_abort(reason="closed")
+        if found["doors"]:
             door = found["doors"][0]
             self._prefill[CONF_DOOR_HOST] = door.get("IPv4Address") or door.get("_ip")
-        if not self._prefill.get(CONF_REGISTRAR_HOST) and found["registrars"]:
-            self._prefill[CONF_REGISTRAR_HOST] = found["registrars"][0]
-        if self._prefill.get(CONF_REGISTRAR_HOST):
-            ext = await self.hass.async_add_executor_job(_free_extension, self._prefill[CONF_REGISTRAR_HOST])
-            if ext:
-                self._prefill[CONF_USERNAME] = ext
+        ext = await self.hass.async_add_executor_job(_free_extension, discovery_info.ip)
+        if not self._flow_alive():
+            return self.async_abort(reason="closed")
+        if ext:
+            self._prefill[CONF_USERNAME] = ext
         return await self.async_step_manual()
 
     async def async_step_discover(self, user_input: dict | None = None) -> ConfigFlowResult:
@@ -335,6 +363,8 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self._show_manual(self._prefill, {"base": "docker_detected"})
         if user_input is None:
             found = await self.hass.async_add_executor_job(_run_discovery)
+            if not self._flow_alive():
+                return self.async_abort(reason="closed")
             registrar_opts = found["registrars"] + found["candidates"] + [DISCOVER_MANUAL]
             door_ips = [d.get("IPv4Address") or d.get("_ip") for d in found["doors"]]
             door_opts = [ip for ip in door_ips if ip] + [DISCOVER_MANUAL]
@@ -355,6 +385,8 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         if registrar != DISCOVER_MANUAL:
             self._prefill[CONF_REGISTRAR_HOST] = registrar
             ext = await self.hass.async_add_executor_job(_free_extension, registrar)
+            if not self._flow_alive():
+                return self.async_abort(reason="closed")
             if ext:
                 self._prefill[CONF_USERNAME] = ext
             try:
@@ -406,6 +438,8 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
                 data[CONF_USERNAME] = ext
             else:
                 errors[CONF_USERNAME] = "cannot_detect_extension"
+        if not self._flow_alive():
+            return self.async_abort(reason="closed")
         if not data[CONF_DOOR_HOST]:
             if door := await self.hass.async_add_executor_job(_door_host):
                 data[CONF_DOOR_HOST] = door
@@ -418,6 +452,8 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             _check_bind, data[CONF_LOCAL_IP], data[CONF_LISTEN_PORT], data[CONF_RTSP_PORT]
         ):
             return await self._show_manual(user_input, {bad: "cannot_bind"})
+        if not self._flow_alive():
+            return self.async_abort(reason="closed")
         statuses = await self.hass.async_add_executor_job(_sip_statuses, data)
         reg = statuses["registrar"]
         if reg is None:

@@ -69,7 +69,9 @@
       "register_rejected": "The server rejected the registration - check port and settings"
     },
     "abort": {
-      "already_configured": "This intercom (serial@registrar) is already configured."
+      "already_configured": "This intercom (serial@registrar) is already configured.",
+      "not_main_indoor": "This unit is not the main indoor station - the entry registers on the main indoor's SIP registrar, so only it is set up.",
+      "closed": "The configuration dialog was closed before this step finished."
     }
   },
   "options": {
