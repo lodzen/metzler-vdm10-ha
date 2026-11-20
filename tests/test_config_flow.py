@@ -568,6 +568,31 @@ async def test_dhcp_extension_indoor_is_suppressed(hass, socket_enabled):
     assert result["reason"] == "not_main_indoor"
 
 
+async def test_dhcp_suppressed_while_station_holds_probe_port(hass, mock_entry, socket_enabled):
+    """the registrar answers on :5060 unconditionally, so the fingerprint can't
+    run while our own station holds that port - every unit then reads as an
+    indoor and non-configured tiles are suppressed (a foreign :5060 holder on
+    a dev box without an entry still fails open)."""
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    await hass.config_entries.async_setup(mock_entry.entry_id)
+    await hass.async_block_till_done()
+    info = DhcpServiceInfo(ip="10.0.0.47", hostname="vdm10-ext", macaddress="bc9b5e01cab9")
+    with (
+        patch(
+            "custom_components.vdm10.config_flow._probe_role",
+            return_value="registrar",
+        ),
+        patch(
+            "custom_components.vdm10.config_flow._is_main_indoor",
+            return_value=None,
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_main_indoor"
+
+
 async def test_closed_flow_skips_remaining_probes(hass, socket_enabled):
     """closing the dialog mid-scan can't kill the running executor job, but
     the free-extension probe that would follow it is skipped."""

@@ -96,18 +96,63 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
         streams = await client.streams.list()
         existing = streams.get(identifier)
         known = {p.url for p in existing.producers} if existing else set()
-        _LOGGER.debug(
-            "go2rtc stream %s: isapi=%s, producers=%s, existing=%s",
+        _LOGGER.info(
+            "go2rtc stream %s: isapi=%s in schemes, producers=%s (was %s)",
             identifier,
             "isapi" in schemes,
-            [p.split("@")[-1] if "@" in p else p.split(":")[0] for p in producers],
-            [k.split("@")[-1] if "@" in k else k for k in sorted(known)],
+            [_redact(p) for p in producers],
+            sorted(_redact(k) for k in known),
         )
         if known != set(producers):
             await client.streams.add(identifier, producers)
+        if "isapi" not in schemes:
+            _LOGGER.warning(
+                "go2rtc has no isapi module - door talkback unavailable. "
+                "Stream %s runs camera-only; reload the entry to retry.",
+                identifier,
+            )
+            _schedule_isapi_retry(hass, runtime, client, identifier)
     except Exception:
-        _LOGGER.debug("go2rtc stream setup failed", exc_info=True)
+        _LOGGER.warning("go2rtc stream setup failed", exc_info=True)
     await _apply_preload(hass, runtime, client, identifier)
+
+
+def _redact(url: str) -> str:
+    """log-safe url: strip credentials, keep scheme + host part"""
+    return url.split("@", 1)[-1] if "@" in url else url.split(":", 1)[0]
+
+
+_ISAPI_RECHECK_ATTEMPTS = 12  # ~60s total, covers a late watchdog respawn
+_ISAPI_RECHECK_INTERVAL = 5
+
+
+def _schedule_isapi_retry(hass: HomeAssistant, runtime, client, identifier: str) -> None:
+    """isapi was missing at configure time - the module can still land late
+    (watchdog respawn slower than our poll). Re-check once after the respawn
+    window and rewrite the stream with the full producer set if it showed
+    up; silent no-op otherwise."""
+
+    async def _recheck() -> None:
+        for _ in range(_ISAPI_RECHECK_ATTEMPTS):
+            await asyncio.sleep(_ISAPI_RECHECK_INTERVAL)
+            try:
+                if "isapi" in await client.schemes.list():
+                    producers = [
+                        _door_rtsp_url(runtime),
+                        f"ffmpeg:{identifier}#audio=opus#query=log_level=debug",
+                        _isapi_url(runtime),
+                    ]
+                    streams = await client.streams.list()
+                    existing = streams.get(identifier)
+                    known = {p.url for p in existing.producers} if existing else set()
+                    if known != set(producers):
+                        await client.streams.add(identifier, producers)
+                    _LOGGER.info("go2rtc stream %s: isapi module appeared - talkback enabled", identifier)
+                    return
+            except Exception:
+                return
+
+    hass.async_create_background_task(_recheck(), f"vdm10_isapi_recheck_{identifier}")
 
 
 async def _apply_preload(hass: HomeAssistant, runtime, client, identifier: str) -> None:
@@ -183,8 +228,9 @@ def _go2rtc_pids() -> list[int]:
         if not entry.name.isdigit():
             continue
         try:
-            cmd = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode()
-            if "/bin/go2rtc" in cmd:
+            argv = (entry / "cmdline").read_bytes().split(b"\0")
+            argv0 = argv[0].decode(errors="replace")
+            if argv0 == "go2rtc" or argv0.endswith("/go2rtc"):
                 out.append(int(entry.name))
         except OSError:
             pass

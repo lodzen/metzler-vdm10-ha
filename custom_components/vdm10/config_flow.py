@@ -170,18 +170,18 @@ def _probe_role(ip: str) -> str:
         return "registrar"
 
 
-def _is_main_indoor(ip: str) -> bool:
+def _is_main_indoor(ip: str) -> bool | None:
     """executor: the registrar fingerprint - only the main indoor answers
     :5065 REGISTERs; extension indoors stay silent. Probing the last slot
     avoids touching the …00 AOR (the main's own number); any reply means a
-    registrar is present. Fail open on bind errors so a busy :5060 can
-    never suppress the tile."""
+    registrar is present. None when the probe socket can't bind :5060 (the
+    registrar replies there unconditionally) - the caller decides."""
     from metzler import discovery
 
     try:
         return discovery.registrar_probe(ip, ext=f"{discovery.EXT_BASE}5", timeout=2.0) is not None
     except OSError:
-        return True
+        return None
 
 
 def _check_bind(ip: str, listen_port: int, rtsp_port: int) -> str | None:
@@ -354,7 +354,15 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(DEFAULT_DISCOVERY_UNIQUE_ID)
         self._abort_if_unique_id_configured()
         role = await self.hass.async_add_executor_job(_probe_role, discovery_info.ip)
-        if role == "door" or not await self.hass.async_add_executor_job(_is_main_indoor, discovery_info.ip):
+        if role == "door":
+            return self.async_abort(reason="not_main_indoor")
+        main = await self.hass.async_add_executor_job(_is_main_indoor, discovery_info.ip)
+        if main is None:
+            # :5060 is held - on a real install by our own running station
+            # (every unit then reads as indoor); a foreign holder is the
+            # dev-box edge case where failing open keeps the tile alive
+            main = not any(getattr(e, "runtime_data", None) for e in self._async_current_entries())
+        if not main:
             return self.async_abort(reason="not_main_indoor")
         self._prefill[CONF_REGISTRAR_HOST] = discovery_info.ip
         try:

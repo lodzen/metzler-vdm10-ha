@@ -90,14 +90,45 @@ async def test_preload_off_by_default(hass, runtime, monkeypatch):
 
 
 async def test_skips_isapi_when_scheme_missing(hass, runtime, monkeypatch):
-    """the embedded go2rtc does not load the isapi module - no isapi producer"""
+    """the embedded go2rtc does not load the isapi module - no isapi producer,
+    but a background recheck is armed in case a respawn lands it late"""
     api = _FakeApi(schemes={"rtsp", "ffmpeg"})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    from custom_components.vdm10.go2rtc import async_configure
+    import custom_components.vdm10.go2rtc as g
 
-    await async_configure(hass, runtime)
+    scheduled = []
+    monkeypatch.setattr(g, "_schedule_isapi_retry", lambda *a: scheduled.append(a))
+    await g.async_configure(hass, runtime)
     assert all(not s.startswith("isapi") for _, sources in api.added for s in sources)
+    assert len(scheduled) == 1
+
+
+async def test_isapi_recheck_rewrites_stream_when_module_lands(hass, runtime, monkeypatch):
+    """isapi absent at configure time but present a few seconds later (the
+    watchdog respawn finishing) - the recheck rewrites the stream with the
+    talkback producer."""
+    calls = {"n": 0}
+    api = _FakeApi(schemes={"rtsp", "ffmpeg"})
+    real_list = api.list
+
+    async def late_isapi():
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            return {"rtsp", "ffmpeg", "isapi"}
+        return await real_list()
+
+    api.schemes = types.SimpleNamespace(list=late_isapi)
+    _rest_client(monkeypatch, api)
+    hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
+    import custom_components.vdm10.go2rtc as g
+
+    monkeypatch.setattr(g, "_ISAPI_RECHECK_INTERVAL", 0)
+    await g.async_configure(hass, runtime)
+    await hass.async_block_till_done()
+    name, sources = api.added[-1]
+    assert name == "vdm10_vdm10_Q12345678_door_camera"
+    assert any(s.startswith("isapi://") for s in sources)
 
 
 async def test_no_go2rtc_is_a_noop(hass, runtime, monkeypatch):
