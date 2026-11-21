@@ -81,6 +81,8 @@ HA-only answering.
 | `button.*_answer_call` | `available` only while ringing; press = library 200-OK → established |
 | `button.*_hang_up` | decline while ringing (`486`/`487`), BYE while established |
 | `vdm10.answer_call` / `vdm10.hangup_call` | services equivalent to the buttons |
+| `event.*_doorbell` | `press` edge per ring, deduped by Call-ID — the Alexa announcement trigger |
+| `vdm10.simulate_doorbell_press` | fires a synthetic press through the same code path — verifies the full Alexa chain without walking to the door |
 | `vdm10_ring` | bus event `{caller, call_id, door}` |
 | `vdm10_answered` | bus event `{call_id, by: "ha" \| "other"}` |
 | `vdm10_call_ended` | bus event `{call_id, reason}` — `answered_elsewhere` is **best-effort** (the registrar's forked-leg CANCEL is identical for answer-elsewhere and caller-timeout) |
@@ -113,6 +115,47 @@ go2rtc opens the door's audio channel only while the talk control is held —
 that enforces **muted-by-default** on the primary path. If the door rejects
 ISAPI audio while a SIP call is established, the fallback is the library's
 RTSP `Require: …backchannel` path (tracked as T032/T039 — hardware gate).
+
+## Alexa — one video-doorbell device
+
+Amazon only plays video on a doorbell press when a **single** endpoint carries
+`Alexa.DoorbellEventSource`, a camera stream interface and
+`displayCategories: ["CAMERA", "DOORBELL"]`. Home Assistant never produces
+that natively, so the integration patches it in itself: the door camera is
+auto-detected (via its `*_door_camera` unique ID) and discovered with both
+categories plus the doorbell interface — the same shape Scrypted announces.
+A press on the internal `event.*_doorbell` entity is delivered under the
+**camera's** endpoint ID, so the announcement and the video arrive on one
+Alexa device.
+
+User steps (the only manual part):
+
+1. **Expose the camera** to Alexa. YAML skill: `camera` in
+   `alexa.smart_home.filter.include_domains`. The `event.*_doorbell` entity
+   must stay **unexposed** — do not include it; the press is forwarded
+   internally. (`entity_config.display_categories` is *not* needed — the
+   `[CAMERA, DOORBELL]` pair is forced for our camera automatically.)
+2. Restart HA, then run **"Alexa, discover devices"** (or Alexa app →
+   *Add device → Other → Discover*). The camera appears as one doorbell
+   device named after the camera entity.
+3. In the Alexa app enable **doorbell announcements** on that device for the
+   Echo devices that should react (device settings → Announcement).
+4. Verify without the physical button:
+   `Developer tools → Actions → vdm10.simulate_doorbell_press` — the Echo
+   should announce and an Echo Show should pop the stream. Debug lines
+   (`custom_components.vdm10: debug`) show each stage, e.g.
+   `doorbell press event.…_doorbell -> camera.…_door_camera (direct)`.
+
+WebRTC (`Alexa.RTCSessionController`) is what drives the live view on Echo
+Show — it requires the go2rtc WebRTC provider from the section above to be
+registered before discovery runs. If announcements arrive but no video opens,
+re-run discovery after confirming go2rtc serves the stream.
+
+> **Nabu Casa note**: the direct press forwarding resolves the YAML
+> `AlexaConfig`/`SmartHomeView`. With a cloud-only setup the press falls back
+> to the listener path — expose `event.*_doorbell` in that case (you will see
+> a second, inert doorbell entry in the app; presses still route to the
+> camera endpoint).
 
 ## Development
 

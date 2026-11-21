@@ -1,9 +1,9 @@
 """Doorbell press event entity - the Alexa DoorbellEventSource path.
 
-An event entity with device_class doorbell maps to DisplayCategory.DOORBELL
-in HA's alexa discovery, so it registers as a doorbell with no
-entity_config - the user only needs the ``event`` domain in their
-smart_home filter.
+The door camera is auto-detected as a video doorbell endpoint
+(["CAMERA", "DOORBELL"] + DoorbellEventSource) and presses from this
+entity are delivered under the camera's endpointId - one Alexa device,
+no entity_config YAML needed.
 """
 
 from conftest import fire_indoor_ring, fire_ring
@@ -87,6 +87,46 @@ async def test_camera_doorbell_config_yields_doorbell_interface(hass, runtime):
     assert "Alexa.DoorbellEventSource" in names
 
 
+async def test_vdm10_camera_auto_detected_as_video_doorbell(hass, runtime):
+    """no entity_config at all: our door camera is detected via its unique_id
+    and reported the Scrypted way - CAMERA+DOORBELL categories plus the
+    DoorbellEventSource interface on the same endpoint"""
+    from types import SimpleNamespace
+
+    from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
+
+    cam_state = hass.states.get("camera.vdm10_test_door_camera")
+    assert cam_state is not None
+    config = SimpleNamespace(
+        entity_config={},
+        should_expose=lambda entity_id: True,
+        generate_alexa_id=lambda entity_id: entity_id,
+    )
+    adapter = ENTITY_ADAPTERS["camera"](hass, config, cam_state)  # ty: ignore[invalid-argument-type]
+    assert adapter.display_categories() == ["CAMERA", "DOORBELL"]
+    names = {iface.name() for iface in adapter.interfaces()}
+    assert "Alexa.DoorbellEventSource" in names
+
+
+async def test_foreign_camera_untouched(hass, runtime):
+    """a camera that is not ours must keep its plain CAMERA shape"""
+    from types import SimpleNamespace
+
+    from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
+    from homeassistant.core import State
+
+    fake = State("camera.someone_elses", "idle", {"supported_features": 0})
+    config = SimpleNamespace(
+        entity_config={},
+        should_expose=lambda entity_id: True,
+        generate_alexa_id=lambda entity_id: entity_id,
+    )
+    adapter = ENTITY_ADAPTERS["camera"](hass, config, fake)  # ty: ignore[invalid-argument-type]
+    assert adapter.display_categories() == ["CAMERA"]
+    names = {iface.name() for iface in adapter.interfaces()}
+    assert "Alexa.DoorbellEventSource" not in names
+
+
 async def test_doorbell_press_redirects_to_camera_endpoint(hass, runtime, monkeypatch):
     """the sender must hand the camera adapter, not the event adapter"""
     from types import SimpleNamespace
@@ -148,6 +188,33 @@ async def test_no_direct_press_when_event_exposed(hass, runtime, monkeypatch):
     monkeypatch.setattr(vdm10, "_orig_send_doorbell", _spy)
     await vdm10._async_fire_doorbell_press(hass, _ENTITY)
     assert sent == []
+
+
+async def test_simulate_service_exercises_full_chain(hass, runtime, monkeypatch):
+    """the debug service must produce a press on the event entity AND run the
+    direct Alexa send - the no-real-ring verification path"""
+    from types import SimpleNamespace
+
+    import custom_components.vdm10 as vdm10
+
+    runtime.station.station.registered.set()
+    runtime._poll_registration(None)
+    sent = []
+
+    async def _spy(hass, config, alexa_entity):
+        sent.append(alexa_entity.entity_id)
+
+    config = SimpleNamespace(
+        should_expose=lambda entity_id: False,
+        entity_config={},
+        generate_alexa_id=lambda entity_id: entity_id,
+    )
+    monkeypatch.setattr(vdm10, "_alexa_smart_home_config", lambda hass: config)
+    monkeypatch.setattr(vdm10, "_orig_send_doorbell", _spy)
+    await hass.services.async_call(vdm10.DOMAIN, "simulate_doorbell_press", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert _state(hass).attributes["event_type"] == "press"
+    assert sent == ["camera.vdm10_test_door_camera"]
 
 
 async def test_alexa_config_captured_on_construction(hass, runtime):

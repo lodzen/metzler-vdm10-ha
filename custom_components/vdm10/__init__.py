@@ -30,12 +30,13 @@ except (ImportError, AttributeError):
     pass
 
 # Amazon links a doorbell's press to its camera only when ONE endpoint carries
-# both Alexa.DoorbellEventSource and a camera stream interface. HA never yields
-# DoorbellEventSource on cameras, and DoorbellPress only fires for
-# event/binary_sensor state transitions (a camera's state is never "on") - so a
-# doorbell entity and a camera entity can never merge natively. Two patches fix
-# that: the camera gets the interface when it is configured
-# display_categories: DOORBELL (same shape binary_sensor uses), and a press
+# both Alexa.DoorbellEventSource and a camera stream interface, and only treats
+# it as a *video* doorbell when displayCategories contains CAMERA+DOORBELL
+# (what Scrypted ships). HA never yields DoorbellEventSource on cameras, and
+# entity_config's display_categories accepts a single value only - so a doorbell
+# entity and a camera entity can never merge natively. Three patches fix that:
+# our door camera is auto-detected via its unique_id and reported as
+# ["CAMERA", "DOORBELL"] with the doorbell interface appended, and a press
 # coming from our doorbell event entity is redirected to the camera endpoint.
 try:
     from collections.abc import Iterable
@@ -53,18 +54,35 @@ try:
         AlexaEntity,
         DisplayCategory,
     )
+    from homeassistant.helpers import entity_registry as _er
+
+    def _is_vdm10_door_camera(hass: HomeAssistant, entity_id: str) -> bool:
+        """auto-detect our door camera by unique_id - the user should not have
+        to write entity_config YAML for the integration to discover itself"""
+        entry = _er.async_get(hass).async_get(entity_id)
+        return bool(entry and entry.platform == DOMAIN and entry.unique_id.endswith("_door_camera"))
+
+    def _cam_is_doorbell(self: AlexaEntity) -> bool:
+        conf = self.config.entity_config.get(self.entity.entity_id, {})
+        return conf.get(CONF_DISPLAY_CATEGORIES) == DisplayCategory.DOORBELL or _is_vdm10_door_camera(
+            self.hass, self.entity_id
+        )
 
     _orig_cam_interfaces = _alexa_entities.CameraCapabilities.interfaces
+    _orig_cam_display_categories = _alexa_entities.CameraCapabilities.display_categories
 
     def _cam_interfaces(self) -> Iterable[AlexaCapability]:
         yield from _orig_cam_interfaces(self)
-        conf = self.config.entity_config.get(self.entity.entity_id, {})
-        if conf.get(CONF_DISPLAY_CATEGORIES) == DisplayCategory.DOORBELL:
+        if _cam_is_doorbell(self):
             yield AlexaDoorbellEventSource(self.entity)
 
-    _alexa_entities.CameraCapabilities.interfaces = _cam_interfaces  # ty: ignore[invalid-assignment]
+    def _cam_display_categories(self) -> list[str] | None:
+        if _cam_is_doorbell(self):
+            return [DisplayCategory.CAMERA, DisplayCategory.DOORBELL]
+        return _orig_cam_display_categories(self)
 
-    from homeassistant.helpers import entity_registry as _er
+    _alexa_entities.CameraCapabilities.interfaces = _cam_interfaces  # ty: ignore[invalid-assignment]
+    _alexa_entities.CameraCapabilities.display_categories = _cam_display_categories  # ty: ignore[invalid-assignment]
 
     _orig_send_doorbell = _alexa_state_report.async_send_doorbell_event_message
 
@@ -164,7 +182,14 @@ async def _async_fire_doorbell_press(hass: HomeAssistant, event_entity_id: str) 
         _LOGGER.debug("doorbell press %s: door camera not resolvable", event_entity_id)
 
 
-from .const import CONF_DOOR_HOST, DOMAIN, PLATFORMS, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL  # noqa: E402
+from .const import (  # noqa: E402
+    CONF_DOOR_HOST,
+    DOMAIN,
+    PLATFORMS,
+    SERVICE_ANSWER_CALL,
+    SERVICE_HANGUP_CALL,
+    SERVICE_SIMULATE_PRESS,
+)
 from .coordinator import Vdm10Runtime  # noqa: E402 - imports metzler: must run after `vendor` above
 
 _LOGGER = logging.getLogger(__name__)
@@ -203,7 +228,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> bo
 
         forget_stream(entry.runtime_data)
         if not hass.config_entries.async_loaded_entries(DOMAIN):
-            for service in (SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL):
+            for service in (SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL, SERVICE_SIMULATE_PRESS):
                 hass.services.async_remove(DOMAIN, service)
     return unload_ok
 
@@ -231,5 +256,28 @@ def _register_services(hass: HomeAssistant) -> None:
         if not hung:
             _LOGGER.warning("vdm10.hangup_call: no active call on any entry")
 
+    async def _simulate(_call: ServiceCall) -> None:
+        # lets users verify the whole doorbell -> Alexa chain from Developer
+        # tools without pressing the physical button (release->install->
+        # restart->ring cycle is too slow for debugging)
+        from homeassistant.components import event as _event_component
+        from homeassistant.helpers import entity_registry as er
+
+        from .event import Vdm10DoorbellEvent
+
+        reg = er.async_get(hass)
+        fired = False
+        for reg_entry in reg.entities.values():
+            if reg_entry.platform != DOMAIN or not reg_entry.unique_id.endswith("_doorbell_press"):
+                continue
+            component = hass.data.get(_event_component.DATA_COMPONENT)
+            entity = component.get_entity(reg_entry.entity_id) if component else None
+            if isinstance(entity, Vdm10DoorbellEvent):
+                entity.simulate_press()
+                fired = True
+        if not fired:
+            _LOGGER.warning("vdm10.simulate_doorbell_press: no doorbell event entity available")
+
     hass.services.async_register(DOMAIN, SERVICE_ANSWER_CALL, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP_CALL, _hangup)
+    hass.services.async_register(DOMAIN, SERVICE_SIMULATE_PRESS, _simulate)

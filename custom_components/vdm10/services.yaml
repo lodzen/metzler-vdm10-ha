@@ -15,3 +15,10 @@ hangup_call:
     entity:
       integration: vdm10
       domain: button
+
+simulate_doorbell_press:
+  name: Simulate doorbell press
+  description: >-
+    Fires the doorbell event as if the physical button was pressed - sends the
+    Alexa DoorbellPress through the door camera endpoint. For testing the Alexa
+    announcement/video chain without walking to the door.

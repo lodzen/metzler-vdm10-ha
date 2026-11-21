@@ -57,5 +57,6 @@ EVENT_CALL_ENDED = f"{DOMAIN}_call_ended"
 
 SERVICE_ANSWER_CALL = "answer_call"
 SERVICE_HANGUP_CALL = "hangup_call"
+SERVICE_SIMULATE_PRESS = "simulate_doorbell_press"
 
 SIGNAL_VDM10_UPDATED = f"{DOMAIN}_updated"
