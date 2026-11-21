@@ -49,6 +49,12 @@ async def test_stream_source_does_not_answer_a_ring(hass, runtime):
     assert runtime.ringing_call is not None
 
 
+async def test_stills_come_from_the_stream(hass, runtime):
+    """the door's ISAPI /picture route hangs post-auth on current firmware -
+    HA must fetch stills via the stream path (go2rtc frame.jpeg on demand)"""
+    assert _camera(hass).use_stream_for_stills is True
+
+
 async def test_snapshot_answers_the_digest_challenge(hass, runtime):
     """Hikvision ISAPI answers Basic with 401 - the snapshot must complete the
     Digest challenge and return the JPEG bytes"""

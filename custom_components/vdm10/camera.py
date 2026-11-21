@@ -4,8 +4,10 @@ The entity owns no puller and never connects to the door's RTSP while idle:
 - ``stream_source`` is just a URL string handed to HA's ``stream`` integration;
   the stream opens only while a viewer is attached and closes when the last
   viewer leaves (standard stream lifecycle; go2rtc when configured).
-- stills are one-shot HTTP fetches from the door's ISAPI snapshot endpoint,
-  so no ``use_stream_for_stills`` and no background preview pull either.
+- stills come from the stream path (``use_stream_for_stills``): HA asks the
+  go2rtc provider for ``/api/frame.jpeg`` on demand - no persistent pull. The
+  door's own ISAPI ``/picture`` route challenges auth but never answers on this
+  firmware, so ``async_camera_image`` is only kept as fallback.
 
 Credentials are embedded in the RTSP URL (the door requires Basic auth); they
 never appear in logs or entity attributes.
@@ -53,6 +55,10 @@ class Vdm10DoorCamera(Camera):
     # feature); the actual audio rides go2rtc's ISAPI backchannel when the
     # user enables Labs -> two_way_audio and a webrtc provider is registered
     _attr_camera_entity_capabilities = CameraEntityCapabilities(two_way_audio=True)
+    # stills via the stream pipeline: the door's ISAPI /picture route accepts
+    # the auth challenge then hangs forever on this firmware - go2rtc's
+    # frame.jpeg serves a one-shot frame from the working RTSP path instead
+    use_stream_for_stills = True
 
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__()
