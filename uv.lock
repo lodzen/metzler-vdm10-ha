@@ -2747,7 +2747,7 @@ wheels = [
 
 [[package]]
 name = "vdm10-ha"
-version = "0.1.19"
+version = "0.1.20"
 source = { virtual = "." }
 dependencies = [
     { name = "vdm10-python" },
