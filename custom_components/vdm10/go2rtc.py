@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -147,6 +148,7 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
             needs_isapi_retry = False
             _patch_streams_add()
             _ISAPI_STREAMS[identifier] = _isapi_url(runtime)
+            await _ensure_isapi_channel(hass, runtime)
         # streams.add REPLACES the producer list - always write the full set.
         # HA's own _update_stream_source then finds the rtsp url present and
         # never rewrites, so the isapi producer survives later offers.
@@ -184,6 +186,55 @@ def _redact(url: str) -> str:
     return url.split("@", 1)[-1] if "@" in url else url.split(":", 1)[0]
 
 
+async def _ensure_isapi_channel(hass: HomeAssistant, runtime) -> None:
+    """enable the door's ISAPI TwoWayAudio channel when it ships disabled.
+
+    With <enabled>false</enabled> the station answers open/audioData normally
+    but plays nothing - go2rtc's isapi producer then sits at 0 bytes sent,
+    which is exactly the silent talkback failure this heals. The flag persists
+    device-side, so enabling once at configure time is enough. Best-effort:
+    unreachable doors or unexpected XML just log at debug."""
+    import aiohttp
+
+    cfg = {**runtime.entry.data, **runtime.entry.options}
+    user = str(cfg.get(CONF_DOOR_USER, DEFAULT_DOOR_USER))
+    pwd = str(cfg.get(CONF_DOOR_PASSWORD, ""))
+    base = f"http://{cfg[CONF_DOOR_HOST]}/ISAPI/System/TwoWayAudio/channels"
+    try:
+        async with aiohttp.ClientSession(
+            middlewares=(aiohttp.DigestAuthMiddleware(user, pwd),),
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as session:
+            async with session.get(base) as resp:
+                xml = await resp.text()
+            m = re.search(r"<id>(\d+)</id>\s*<enabled>(\w+)</enabled>", xml)
+            if m is None:
+                _LOGGER.debug("isapi channel probe: unexpected channels XML from %s", cfg[CONF_DOOR_HOST])
+                return
+            channel, enabled = m.group(1), m.group(2)
+            if enabled == "true":
+                return
+            codec = re.search(r"<audioCompressionType>([^<]+)</audioCompressionType>", xml)
+            payload = (
+                '<TwoWayAudioChannel version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">'
+                f"<id>{channel}</id><enabled>true</enabled>"
+                f"<audioCompressionType>{codec.group(1) if codec else 'G.711ulaw'}"
+                "</audioCompressionType></TwoWayAudioChannel>"
+            )
+            async with session.put(
+                f"{base}/{channel}",
+                data=payload,
+                headers={"Content-Type": "application/xml"},
+            ) as resp:
+                ok = resp.status == 200
+        if ok:
+            _LOGGER.info("isapi TwoWayAudio channel %s was disabled - enabled for talkback", channel)
+        else:
+            _LOGGER.debug("isapi channel enable PUT returned %s", resp.status)
+    except Exception:
+        _LOGGER.debug("isapi channel probe failed", exc_info=True)
+
+
 _SCHEMES_RETRY_ATTEMPTS = 10  # ~10s for the managed process to start listening
 _ISAPI_RECHECK_ATTEMPTS = 12  # ~60s total, covers a late watchdog respawn
 _ISAPI_RECHECK_INTERVAL = 5
@@ -214,6 +265,7 @@ def _schedule_isapi_retry(hass: HomeAssistant, runtime, client, identifier: str)
                 await client.streams.add(identifier, producers)
                 _patch_streams_add()
                 _ISAPI_STREAMS[identifier] = _isapi_url(runtime)
+                await _ensure_isapi_channel(hass, runtime)
                 _LOGGER.info("go2rtc stream %s: isapi module appeared - talkback enabled", identifier)
                 return
             except Exception:

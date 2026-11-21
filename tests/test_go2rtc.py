@@ -48,14 +48,61 @@ def _rest_client(monkeypatch, api):
     monkeypatch.setattr(go2rtc_client.rest, "Go2RtcRestClient", lambda s, u: api)
 
 
+def _isapi_probe_stub(monkeypatch, g, http):
+    """swap aiohttp.ClientSession for a canned-XML fake - keeps the isapi
+    channel probe off the network in tests."""
+    import aiohttp
+
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda **kw: http)
+
+
+class _FakeResp:
+    def __init__(self, body, status=200):
+        self._body = body
+        self.status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return None
+
+    async def text(self):
+        return self._body
+
+
+class _FakeHttp:
+    """aiohttp.ClientSession stand-in: canned GET body, records PUTs"""
+
+    def __init__(self, xml, status=200):
+        self._xml = xml
+        self._status = status
+        self.puts = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return None
+
+    def get(self, url, **kw):
+        return _FakeResp(self._xml)
+
+    def put(self, url, **kw):
+        self.puts.append((url, kw.get("data")))
+        return _FakeResp("<ok/>", self._status)
+
+
 @pytest.mark.parametrize("mock_entry", [{CONF_PRELOAD_STREAM: True}], indirect=True)
 async def test_registers_producers_and_preload(hass, runtime, monkeypatch):
     api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    from custom_components.vdm10.go2rtc import async_configure
+    import custom_components.vdm10.go2rtc as g
 
-    await async_configure(hass, runtime)
+    _isapi_probe_stub(monkeypatch, g, _FakeHttp("<id>1</id><enabled>true</enabled>"))
+    await g.async_configure(hass, runtime)
+
     name, sources = api.added[0]
     assert name == "vdm10_vdm10_Q12345678_door_camera"
     rtsp = f"rtsp://{ENTRY_DATA['door_user']}:{ENTRY_DATA['door_password']}@{ENTRY_DATA['door_host']}:554/ch1/main/av_stream"
@@ -123,6 +170,7 @@ async def test_isapi_recheck_rewrites_stream_when_module_lands(hass, runtime, mo
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
     import custom_components.vdm10.go2rtc as g
 
+    _isapi_probe_stub(monkeypatch, g, _FakeHttp("<id>1</id><enabled>true</enabled>"))
     monkeypatch.setattr(g, "_ISAPI_RECHECK_INTERVAL", 0)
     await g.async_configure(hass, runtime)
     await hass.async_block_till_done()
@@ -141,6 +189,7 @@ async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
     import custom_components.vdm10.go2rtc as g
 
+    _isapi_probe_stub(monkeypatch, g, _FakeHttp("<id>1</id><enabled>true</enabled>"))
     await g.async_configure(hass, runtime)
     name = "vdm10_vdm10_Q12345678_door_camera"
     isapi = g._ISAPI_STREAMS[name]
@@ -191,3 +240,66 @@ async def test_api_failure_is_swallowed(hass, runtime, monkeypatch):
     monkeypatch.setattr(g, "_SCHEMES_RETRY_ATTEMPTS", 1)
     await g.async_configure(hass, runtime)  # must not raise
     assert len(scheduled) == 1
+
+
+_CHANNELS_OFF = """<TwoWayAudioChannelList><TwoWayAudioChannel>
+<id>1</id><enabled>false</enabled>
+<audioCompressionType>G.711ulaw</audioCompressionType>
+</TwoWayAudioChannel></TwoWayAudioChannelList>"""
+
+_CHANNELS_ON = _CHANNELS_OFF.replace("false", "true")
+
+
+async def test_isapi_channel_disabled_gets_enabled(hass, runtime, monkeypatch):
+    """a door that ships with <enabled>false</enabled> accepts open/audioData
+    but stays silent - the probe enables the channel via PUT at configure."""
+    api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
+    _rest_client(monkeypatch, api)
+    hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
+    import custom_components.vdm10.go2rtc as g
+
+    http = _FakeHttp(_CHANNELS_OFF)
+    _isapi_probe_stub(monkeypatch, g, http)
+    await g.async_configure(hass, runtime)
+    assert len(http.puts) == 1
+    url, data = http.puts[0]
+    assert url.endswith("/TwoWayAudio/channels/1")
+    assert "<enabled>true</enabled>" in data
+    assert "G.711ulaw" in data
+
+
+async def test_isapi_channel_enabled_is_left_alone(hass, runtime, monkeypatch):
+    api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
+    _rest_client(monkeypatch, api)
+    hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
+    import custom_components.vdm10.go2rtc as g
+
+    http = _FakeHttp(_CHANNELS_ON)
+    _isapi_probe_stub(monkeypatch, g, http)
+    await g.async_configure(hass, runtime)
+    assert http.puts == []
+
+
+async def test_isapi_probe_failure_is_swallowed(hass, runtime, monkeypatch):
+    """door unreachable at configure time: the stream setup must still land,
+    the probe just logs and moves on."""
+
+    class _Boom:
+        def get(self, url, **kw):
+            raise RuntimeError("door down")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return None
+
+    api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
+    _rest_client(monkeypatch, api)
+    hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
+    import custom_components.vdm10.go2rtc as g
+
+    _isapi_probe_stub(monkeypatch, g, _Boom())
+    await g.async_configure(hass, runtime)  # must not raise
+    _name, sources = api.added[0]
+    assert any(s.startswith("isapi://") for s in sources)
