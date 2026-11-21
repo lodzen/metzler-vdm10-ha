@@ -1,5 +1,7 @@
 # VDM10 Intercom — Home Assistant Integration
 
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lodzen&repository=metzler-vdm10-ha&category=integration)
+
 Home Assistant custom integration for the Metzler/Hikvision **VDM10** door intercom.
 It embeds the standalone [`metzler-vdm10`](../metzler-vdm10) SIP library and registers
 your HA instance as a room station on the VDM10 SIP registrar.
@@ -18,9 +20,9 @@ your HA instance as a room station on the VDM10 SIP registrar.
 
 ## Install (HACS / Marketplace custom repository)
 
-1. In Home Assistant: **Settings → Add-ons → HACS** (or the new Marketplace) →
-   **Custom repositories / Add from link** → add `https://github.com/lodzen/metzler-vdm10-ha`
-   as an *Integration* repository.
+1. Click the badge above — or in Home Assistant: **Settings → Add-ons → HACS**
+   (or the new Marketplace) → **Custom repositories / Add from link** → add
+   `https://github.com/lodzen/metzler-vdm10-ha` as an *Integration* repository.
 2. Install **VDM10 Intercom**, restart Home Assistant.
 3. **Settings → Devices & Services → Add Integration → VDM10 Intercom** —
    choose **Search the network** for auto-discovery or **Manual setup**.

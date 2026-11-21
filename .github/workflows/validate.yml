@@ -1,0 +1,31 @@
+# Validation required for the HACS/Marketplace default catalog:
+# hacs/action runs the same checks as the catalog review (no ignored checks),
+# hassfest validates the custom_components integration manifest and files.
+name: Validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master

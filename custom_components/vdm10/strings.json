@@ -41,7 +41,7 @@
           "sip_port": "Provider port",
           "sip_user": "Provider user",
           "sip_pass": "Provider password",
-          "sip_target": "Ring target for incoming calls (empty = sip:<user>@<domain>, all account devices)",
+          "sip_target": "Ring target for incoming calls (empty = sip:user@domain, all account devices)",
           "sip_domain": "Provider domain in the REGISTER (empty = same as host)",
           "sip_srtp": "Offer SRTP to the provider",
           "inbound_target": "Intercom extension to ring when called via SIP (empty = the main indoor station)",

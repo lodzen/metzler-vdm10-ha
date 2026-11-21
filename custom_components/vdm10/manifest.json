@@ -1,6 +1,8 @@
 {
   "domain": "vdm10",
   "name": "VDM10 Intercom",
+  "after_dependencies": ["alexa"],
+  "categories": ["security_safety.doorbells_intercoms"],
   "codeowners": ["@lodzen"],
   "config_flow": true,
   "dhcp": [
