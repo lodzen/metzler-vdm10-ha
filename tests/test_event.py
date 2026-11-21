@@ -108,6 +108,37 @@ async def test_vdm10_camera_auto_detected_as_video_doorbell(hass, runtime):
     assert "Alexa.DoorbellEventSource" in names
 
 
+async def test_duplex_rtc_controller_for_two_way_camera(hass, runtime, monkeypatch):
+    """HA's RTCSessionController hardcodes isFullDuplexAudioSupported=False -
+    for a camera with resolved two_way_audio the integration must advertise
+    duplex instead, else the Echo never opens the mic/audio path"""
+    from types import SimpleNamespace
+
+    from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
+    from homeassistant.components.camera import StreamType
+
+    import custom_components.vdm10 as vdm10
+
+    cam_state = hass.states.get("camera.vdm10_test_door_camera")
+    assert cam_state is not None
+    fake_entity = SimpleNamespace(
+        camera_capabilities=SimpleNamespace(
+            two_way_audio=True,
+            frontend_stream_types={StreamType.WEB_RTC},
+        )
+    )
+    monkeypatch.setattr(vdm10._alexa_entities, "async_get_camera_entity", lambda hass, eid: fake_entity)
+    config = SimpleNamespace(
+        entity_config={},
+        should_expose=lambda entity_id: True,
+        generate_alexa_id=lambda entity_id: entity_id,
+    )
+    adapter = ENTITY_ADAPTERS["camera"](hass, config, cam_state)  # ty: ignore[invalid-argument-type]
+    rtc = [iface for iface in adapter.interfaces() if iface.name() == "Alexa.RTCSessionController"]
+    assert len(rtc) == 1
+    assert rtc[0].configuration()["isFullDuplexAudioSupported"] is True
+
+
 async def test_foreign_camera_untouched(hass, runtime):
     """a camera that is not ours must keep its plain CAMERA shape"""
     from types import SimpleNamespace

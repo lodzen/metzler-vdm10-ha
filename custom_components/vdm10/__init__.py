@@ -46,6 +46,7 @@ try:
     from homeassistant.components.alexa.capabilities import (
         AlexaCapability,
         AlexaDoorbellEventSource,
+        AlexaRTCSessionController,
     )
     from homeassistant.components.alexa.config import AbstractConfig
     from homeassistant.components.alexa.const import CONF_DISPLAY_CATEGORIES
@@ -68,12 +69,30 @@ try:
             self.hass, self.entity_id
         )
 
+    # HA reports half-duplex for EVERY camera's RTCSessionController, so
+    # Amazon never opens the mic path - no talking and no door audio on the
+    # Echo either. For a camera whose resolved capabilities prove two-way
+    # audio (entity flag + WebRTC provider + labs feature), swap in a
+    # duplex-advertising subclass instead.
+    class _DuplexRTCSessionController(AlexaRTCSessionController):
+        def configuration(self):
+            conf = super().configuration()
+            return {**(conf or {}), "isFullDuplexAudioSupported": True}
+
     _orig_cam_interfaces = _alexa_entities.CameraCapabilities.interfaces
     _orig_cam_display_categories = _alexa_entities.CameraCapabilities.display_categories
 
     def _cam_interfaces(self) -> Iterable[AlexaCapability]:
-        yield from _orig_cam_interfaces(self)
-        if _cam_is_doorbell(self):
+        doorbell = _cam_is_doorbell(self)
+        duplex = False
+        if doorbell and (entity := _alexa_entities.async_get_camera_entity(self.hass, self.entity_id)):
+            duplex = entity.camera_capabilities.two_way_audio
+        for iface in _orig_cam_interfaces(self):
+            if duplex and isinstance(iface, AlexaRTCSessionController):
+                yield _DuplexRTCSessionController(self.entity)
+            else:
+                yield iface
+        if doorbell:
             yield AlexaDoorbellEventSource(self.entity)
 
     def _cam_display_categories(self) -> list[str] | None:
