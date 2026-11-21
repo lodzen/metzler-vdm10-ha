@@ -1,6 +1,6 @@
 [project]
 name = "vdm10-ha"
-version = "0.1.19"
+version = "0.1.20"
 description = "Home Assistant custom integration for the Metzler/Hikvision VDM10 door intercom"
 readme = "README.md"
 authors = [

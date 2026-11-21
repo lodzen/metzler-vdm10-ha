@@ -142,7 +142,15 @@ async def async_configure(hass: HomeAssistant, runtime) -> None:
                 await asyncio.sleep(1)
         if "isapi" not in schemes and await _respawn_for_isapi(hass, go2rtc_cfg, client):
             schemes = await client.schemes.list()
-        producers = [_door_rtsp_url(runtime), f"ffmpeg:{identifier}#audio=opus#query=log_level=debug"]
+        # Producer order selects the audio codec: go2rtc walks the list for
+        # each consumer media and takes the first producer that can serve a
+        # matching codec. ffmpeg-opus first means every WebRTC client (incl.
+        # Alexa, whose Echo can't render the door's pcm_mulaw) negotiates
+        # opus; clients without opus still fall through to rtsp pcm_mulaw.
+        producers = [
+            f"ffmpeg:{identifier}#audio=opus#query=log_level=debug",
+            _door_rtsp_url(runtime),
+        ]
         if "isapi" in schemes:
             producers.append(_isapi_url(runtime))
             needs_isapi_retry = False
@@ -258,8 +266,8 @@ def _schedule_isapi_retry(hass: HomeAssistant, runtime, client, identifier: str)
                 if "isapi" not in await client.schemes.list():
                     continue
                 producers = [
-                    _door_rtsp_url(runtime),
                     f"ffmpeg:{identifier}#audio=opus#query=log_level=debug",
+                    _door_rtsp_url(runtime),
                     _isapi_url(runtime),
                 ]
                 await client.streams.add(identifier, producers)

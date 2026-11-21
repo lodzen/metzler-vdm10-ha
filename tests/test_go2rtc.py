@@ -106,9 +106,11 @@ async def test_registers_producers_and_preload(hass, runtime, monkeypatch):
     name, sources = api.added[0]
     assert name == "vdm10_vdm10_Q12345678_door_camera"
     rtsp = f"rtsp://{ENTRY_DATA['door_user']}:{ENTRY_DATA['door_password']}@{ENTRY_DATA['door_host']}:554/ch1/main/av_stream"
+    # ffmpeg-opus first: go2rtc picks the first producer able to serve a
+    # consumer media - this is what makes WebRTC clients negotiate opus.
     assert sources == [
-        rtsp,
         f"ffmpeg:{name}#audio=opus#query=log_level=debug",
+        rtsp,
         f"isapi://{ENTRY_DATA['door_user']}:{ENTRY_DATA['door_password']}@{ENTRY_DATA['door_host']}/",
     ]
     # preload goes through the camera prefs (survives provider rebinds)
