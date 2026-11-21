@@ -137,8 +137,9 @@ async def test_isapi_recheck_rewrites_stream_when_module_lands(hass, runtime, mo
 async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
     """go2rtc masks producer credentials ('***'), so HA's lazy
     _update_stream_source rewrite always fires for credentialed cameras and
-    drops the isapi backchannel - the Streams.add wrapper re-appends it on
-    every rewrite of our stream and leaves other streams untouched."""
+    rewrites [rtsp, ffmpeg] - the Streams.add wrapper restores our canonical
+    [ffmpeg, rtsp, isapi] order on every rewrite of our stream (rtsp first
+    would let pcm_mulaw win over opus) and leaves other streams untouched."""
     api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
@@ -158,7 +159,7 @@ async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
 
     client = _rest._StreamClient(_Base())
     await client.add(name, ["rtsp://u:p@door/ch", f"ffmpeg:{name}#audio=opus"])
-    assert captured[-1] == ["rtsp://u:p@door/ch", f"ffmpeg:{name}#audio=opus", isapi]
+    assert captured[-1] == [f"ffmpeg:{name}#audio=opus", "rtsp://u:p@door/ch", isapi]
     await client.add("other_stream", ["rtsp://x"])
     assert captured[-1] == ["rtsp://x"]
 

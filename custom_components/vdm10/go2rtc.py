@@ -55,15 +55,16 @@ _STREAMS_ADD_PATCHED = False
 
 
 def _patch_streams_add() -> None:
-    """Re-append our isapi producer to HA's own stream rewrites.
+    """Repair our producer set + order on HA's own stream rewrites.
 
     go2rtc's ``/api/streams`` masks credentials in producer urls (``***``), so
     ``_update_stream_source``'s ``stream_source == producer.url`` check never
     matches a credentialed camera - every WebRTC offer and go2rtc still then
-    rewrites the producers as plain ``[rtsp, ffmpeg]``, dropping the isapi
-    backchannel on the very session that needs it. Wrapping ``_StreamClient.add``
-    re-appends it on every rewrite of a registered stream; a no-op for any
-    stream that isn't ours."""
+    rewrites the producers as plain ``[rtsp, ffmpeg]``. That drops the isapi
+    backchannel AND puts rtsp back first, so the pcm_mulaw codec wins over the
+    ffmpeg opus mirror even for consumers that offer opus first (Alexa does).
+    Wrapping ``_StreamClient.add`` restores ``[ffmpeg, rtsp, isapi]`` on every
+    rewrite of a registered stream; a no-op for any stream that isn't ours."""
     global _STREAMS_ADD_PATCHED
     if _STREAMS_ADD_PATCHED:
         return
@@ -78,8 +79,13 @@ def _patch_streams_add() -> None:
         if isapi is not None:
             if isinstance(sources, str):
                 sources = [sources]
-            if not any(s.startswith("isapi://") for s in sources):
-                sources = [*sources, isapi]
+            # enforce our canonical order on every rewrite: HA writes
+            # [rtsp, ffmpeg#opus] (rtsp first) and go2rtc matches the first
+            # producer that can serve a codec - ffmpeg first keeps opus
+            # reachable for consumers that offer it (Alexa does, first)
+            ffmpeg = [s for s in sources if s.startswith("ffmpeg:")]
+            rest = [s for s in sources if not s.startswith(("ffmpeg:", "isapi://"))]
+            sources = [*ffmpeg, *rest, isapi]
         return await orig_add(self, name, sources)
 
     _rest._StreamClient.add = _add
