@@ -2,7 +2,7 @@
 
 from homeassistant.const import Platform
 
-DOMAIN = "vdm10"
+DOMAIN = "metzler_vdm10"
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.CAMERA, Platform.EVENT]
 

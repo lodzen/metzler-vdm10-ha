@@ -41,7 +41,7 @@ class Vdm10DoorbellEvent(EventEntity):
     def __init__(self, runtime: Vdm10Runtime) -> None:
         self.runtime = runtime
         self._attr_event_types = [EVENT_PRESS]
-        self._attr_unique_id = f"vdm10_{runtime.serial}_doorbell_press"
+        self._attr_unique_id = f"{runtime.serial}_doorbell_press"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, runtime.serial)})
         self._seen_call_id: str | None = None
 
@@ -71,7 +71,7 @@ class Vdm10DoorbellEvent(EventEntity):
     @callback
     def simulate_press(self) -> None:
         """fires the same edge a real ring would - called by the
-        ``vdm10.simulate_doorbell_press`` service so the full Alexa delivery
+        ``metzler_vdm10.simulate_doorbell_press`` service so the full Alexa delivery
         chain can be tested without pressing the physical button"""
         self._trigger_event(EVENT_PRESS, {"caller": "simulated", "call_id": f"simulated-{id(self)}"})
         self.async_write_ha_state()

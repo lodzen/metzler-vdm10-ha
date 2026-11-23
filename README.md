@@ -28,7 +28,7 @@ your HA instance as a room station on the VDM10 SIP registrar.
    choose **Search the network** for auto-discovery or **Manual setup**.
 
 The release ZIP ships the `metzler` library vendored under
-`custom_components/vdm10/vendor/` (built by `tools/vendor.py`) — no manual
+`custom_components/metzler_vdm10/vendor/` (built by `tools/vendor.py`) — no manual
 dependency install and no PyPI requirement.
 
 ## Configuration
@@ -82,9 +82,9 @@ HA-only answering.
 | `camera.*_door` | `CameraEntityFeature.STREAM`; `stream_source` = `rtsp://<door_user>:<door_pass>@<door_host>:554/ch1/main/av_stream`; stills via one-shot ISAPI snapshot |
 | `button.*_answer_call` | `available` only while ringing; press = library 200-OK → established |
 | `button.*_hang_up` | decline while ringing (`486`/`487`), BYE while established |
-| `vdm10.answer_call` / `vdm10.hangup_call` | services equivalent to the buttons |
+| `metzler_vdm10.answer_call` / `metzler_vdm10.hangup_call` | services equivalent to the buttons |
 | `event.*_doorbell` | `press` edge per ring, deduped by Call-ID — the Alexa announcement trigger |
-| `vdm10.simulate_doorbell_press` | fires a synthetic press through the same code path — verifies the full Alexa chain without walking to the door |
+| `metzler_vdm10.simulate_doorbell_press` | fires a synthetic press through the same code path — verifies the full Alexa chain without walking to the door |
 | `vdm10_ring` | bus event `{caller, call_id, door}` |
 | `vdm10_answered` | bus event `{call_id, by: "ha" \| "other"}` |
 | `vdm10_call_ended` | bus event `{call_id, reason}` — `answered_elsewhere` is **best-effort** (the registrar's forked-leg CANCEL is identical for answer-elsewhere and caller-timeout) |
@@ -143,9 +143,9 @@ User steps (the only manual part):
 3. In the Alexa app enable **doorbell announcements** on that device for the
    Echo devices that should react (device settings → Announcement).
 4. Verify without the physical button:
-   `Developer tools → Actions → vdm10.simulate_doorbell_press` — the Echo
+   `Developer tools → Actions → metzler_vdm10.simulate_doorbell_press` — the Echo
    should announce and an Echo Show should pop the stream. Debug lines
-   (`custom_components.vdm10: debug`) show each stage, e.g.
+   (`custom_components.metzler_vdm10: debug`) show each stage, e.g.
    `doorbell press event.…_doorbell -> camera.…_door_camera (direct)`.
 
 WebRTC (`Alexa.RTCSessionController`) is what drives the live view on Echo
@@ -168,11 +168,11 @@ uv run pytest ../metzler-vdm10           # library suite (must stay green)
 uv run ruff check custom_components tests tools
 uv run ruff format custom_components tests tools
 uv run ty check
-uv run complexipy custom_components/vdm10 tests tools -e vendor
+uv run complexipy custom_components/metzler_vdm10 tests tools -e vendor
 ```
 
 **Release**: `uv run python tools/vendor.py` vendors `../metzler-vdm10/src/metzler`
-into `custom_components/vdm10/vendor/metzler` (with `_version.py` stamp); the
+into `custom_components/metzler_vdm10/vendor/metzler` (with `_version.py` stamp); the
 committed `vendor/__init__.py` loader appends that dir to `sys.path` before the
 first `import metzler`. `tests/test_vendor.py` verifies the vendored import in
 isolation. Then tag a GitHub release — HACS serves the tag.

@@ -51,7 +51,7 @@ class AnswerCallButton(_Vdm10Button):
 
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__(runtime)
-        self._attr_unique_id = f"vdm10_{runtime.serial}_answer"
+        self._attr_unique_id = f"{runtime.serial}_answer"
 
     @property
     def available(self) -> bool:
@@ -67,7 +67,7 @@ class HangupButton(_Vdm10Button):
 
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__(runtime)
-        self._attr_unique_id = f"vdm10_{runtime.serial}_hangup"
+        self._attr_unique_id = f"{runtime.serial}_hangup"
 
     @property
     def available(self) -> bool:
@@ -88,7 +88,7 @@ class RebootDoorButton(_Vdm10Button):
 
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__(runtime)
-        self._attr_unique_id = f"vdm10_{runtime.serial}_door_reboot"
+        self._attr_unique_id = f"{runtime.serial}_door_reboot"
 
     @property
     def available(self) -> bool:
@@ -127,7 +127,7 @@ class UnlockDoorButton(_Vdm10Button):
 
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__(runtime)
-        self._attr_unique_id = f"vdm10_{runtime.serial}_door_unlock"
+        self._attr_unique_id = f"{runtime.serial}_door_unlock"
 
     @property
     def available(self) -> bool:

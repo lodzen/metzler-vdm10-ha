@@ -5,7 +5,7 @@ answer_call:
     microphone stays muted until the camera's talk control is used).
   target:
     entity:
-      integration: vdm10
+      integration: metzler_vdm10
       domain: button
 
 hangup_call:
@@ -13,7 +13,7 @@ hangup_call:
   description: Declines the ringing call or hangs up the established call.
   target:
     entity:
-      integration: vdm10
+      integration: metzler_vdm10
       domain: button
 
 simulate_doorbell_press:

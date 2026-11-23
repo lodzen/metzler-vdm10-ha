@@ -2,7 +2,7 @@
 
 Owns the HaStation thread bridge, tracks active calls (a dict keyed by Call-ID -
 the library's ``self.calls`` mirrors concurrent calls, so no single
-``current_call``), fires the ``vdm10_*`` bus events, and signals entities via
+``current_call``), fires the ``metzler_vdm10_*`` bus events, and signals entities via
 dispatcher. ``answer_call``/``hangup_call`` go through the executor - both send
 SIP packets synchronously.
 """
@@ -171,20 +171,20 @@ class Vdm10Runtime:
         """answer the ringing call via the library's 200-OK path (executor)"""
         sess = self.ringing_call
         if sess is None or self.station is None or self.station.station is None:
-            _LOGGER.warning("vdm10: answer requested but no call is ringing")
+            _LOGGER.warning("metzler_vdm10: answer requested but no call is ringing")
             return False
         sess.answered_by_us = True
         ok = await self.hass.async_add_executor_job(self.station.station.answer_call, sess.call_id)
         if not ok:
             sess.answered_by_us = False
-            _LOGGER.warning("vdm10: answer failed - call %s no longer ringing", sess.call_id)
+            _LOGGER.warning("metzler_vdm10: answer failed - call %s no longer ringing", sess.call_id)
         return ok
 
     async def async_hangup_call(self) -> bool:
         """decline (early) or BYE (established) the active call (executor)"""
         sess = self.active_call
         if sess is None or self.station is None or self.station.station is None:
-            _LOGGER.warning("vdm10: hangup requested but no call is active")
+            _LOGGER.warning("metzler_vdm10: hangup requested but no call is active")
             return False
         return await self.hass.async_add_executor_job(self.station.station.hangup_call, sess.call_id)
 

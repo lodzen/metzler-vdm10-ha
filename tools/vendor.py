@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor the metzler library into custom_components/vdm10/vendor/ for release.
+"""Vendor the metzler library into custom_components/metzler_vdm10/vendor/ for release.
 
 The Marketplace installs this repository as-is; manifest `requirements` can only
 name PyPI packages, so the sibling `metzler-vdm10` source tree is copied in.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT.parent / "metzler-vdm10" / "src" / "metzler"
-DST = ROOT / "custom_components" / "vdm10" / "vendor" / "metzler"
+DST = ROOT / "custom_components" / "metzler_vdm10" / "vendor" / "metzler"
 
 
 def main():

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VENDOR = ROOT / "custom_components" / "vdm10" / "vendor"
+VENDOR = ROOT / "custom_components" / "metzler_vdm10" / "vendor"
 
 
 def test_vendor_script_stamps_and_imports():

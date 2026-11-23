@@ -8,7 +8,7 @@ import threading
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 
 from conftest import ENTRY_DATA
-from custom_components.vdm10.const import CONF_REGISTRAR_PORT
+from custom_components.metzler_vdm10.const import CONF_REGISTRAR_PORT
 
 
 @contextlib.contextmanager

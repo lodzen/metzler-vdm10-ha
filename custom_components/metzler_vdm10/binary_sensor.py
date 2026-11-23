@@ -41,7 +41,7 @@ class RingSensor(BinarySensorEntity):
         self.runtime = runtime
         self._door = door
         self._attr_translation_key = "doorbell_ringing" if door else "indoor_ringing"
-        self._attr_unique_id = f"vdm10_{runtime.serial}_{'doorbell' if door else 'indoor_ringing'}"
+        self._attr_unique_id = f"{runtime.serial}_{'doorbell' if door else 'indoor_ringing'}"
         self._attr_icon = "mdi:doorbell-video" if door else "mdi:phone-ring"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, runtime.serial)},
@@ -87,7 +87,7 @@ class Vdm10RegistrationSensor(BinarySensorEntity):
         self.runtime = runtime
         self._leg = leg
         self._attr_translation_key = key
-        self._attr_unique_id = f"vdm10_{runtime.serial}_{key}"
+        self._attr_unique_id = f"{runtime.serial}_{key}"
 
     @property
     def device_info(self) -> DeviceInfo:

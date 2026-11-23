@@ -1,7 +1,7 @@
 """Answer/hangup buttons + services (US3)."""
 
 from conftest import fire_ring
-from custom_components.vdm10.const import DOMAIN, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL
+from custom_components.metzler_vdm10.const import DOMAIN, SERVICE_ANSWER_CALL, SERVICE_HANGUP_CALL
 
 
 async def test_buttons_unavailable_without_a_call(hass, runtime):

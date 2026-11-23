@@ -5,7 +5,7 @@ import types
 import pytest
 
 from conftest import ENTRY_DATA
-from custom_components.vdm10.const import CONF_PRELOAD_STREAM
+from custom_components.metzler_vdm10.const import CONF_PRELOAD_STREAM
 
 
 class _FakeApi:
@@ -53,17 +53,19 @@ async def test_registers_producers_and_preload(hass, runtime, monkeypatch):
     api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    import custom_components.vdm10.go2rtc as g
+    import custom_components.metzler_vdm10.go2rtc as g
 
     await g.async_configure(hass, runtime)
 
     name, sources = api.added[0]
-    assert name == "vdm10_vdm10_Q12345678_door_camera"
+    assert name == "metzler_vdm10_Q12345678_door_camera"
     rtsp = f"rtsp://{ENTRY_DATA['door_user']}:{ENTRY_DATA['door_password']}@{ENTRY_DATA['door_host']}:554/ch1/main/av_stream"
     # ffmpeg-opus first: go2rtc picks the first producer able to serve a
     # consumer media - this is what makes WebRTC clients negotiate opus.
+    # The mirror carries the volume boost (the door's mic feed is ~20 dB
+    # under the intercom path on the RTSP track).
     assert sources == [
-        f"ffmpeg:{name}#audio=opus#query=log_level=debug",
+        f"ffmpeg:{name}#audio=opus#query=log_level=debug#raw=-af#raw=volume=8",
         rtsp,
         f"isapi://{ENTRY_DATA['door_user']}:{ENTRY_DATA['door_password']}@{ENTRY_DATA['door_host']}/",
     ]
@@ -77,11 +79,11 @@ async def test_registers_producers_and_preload(hass, runtime, monkeypatch):
 
 async def test_preload_off_by_default(hass, runtime, monkeypatch):
     """preload is opt-in: without the option a leftover preload is disabled"""
-    name = "vdm10_vdm10_Q12345678_door_camera"
+    name = "metzler_vdm10_Q12345678_door_camera"
     api = _FakeApi(schemes={"rtsp", "ffmpeg"}, preloads={name})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    from custom_components.vdm10.go2rtc import async_configure
+    from custom_components.metzler_vdm10.go2rtc import async_configure
 
     await async_configure(hass, runtime)
     assert api.preloaded == []
@@ -98,7 +100,7 @@ async def test_skips_isapi_when_scheme_missing(hass, runtime, monkeypatch):
     api = _FakeApi(schemes={"rtsp", "ffmpeg"})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    import custom_components.vdm10.go2rtc as g
+    import custom_components.metzler_vdm10.go2rtc as g
 
     scheduled = []
     monkeypatch.setattr(g, "_schedule_isapi_retry", lambda *a: scheduled.append(a))
@@ -124,13 +126,13 @@ async def test_isapi_recheck_rewrites_stream_when_module_lands(hass, runtime, mo
     api.schemes = types.SimpleNamespace(list=late_isapi)
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    import custom_components.vdm10.go2rtc as g
+    import custom_components.metzler_vdm10.go2rtc as g
 
     monkeypatch.setattr(g, "_ISAPI_RECHECK_INTERVAL", 0)
     await g.async_configure(hass, runtime)
     await hass.async_block_till_done()
     name, sources = api.added[-1]
-    assert name == "vdm10_vdm10_Q12345678_door_camera"
+    assert name == "metzler_vdm10_Q12345678_door_camera"
     assert any(s.startswith("isapi://") for s in sources)
 
 
@@ -138,15 +140,16 @@ async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
     """go2rtc masks producer credentials ('***'), so HA's lazy
     _update_stream_source rewrite always fires for credentialed cameras and
     rewrites [rtsp, ffmpeg] - the Streams.add wrapper restores our canonical
-    [ffmpeg, rtsp, isapi] order on every rewrite of our stream (rtsp first
-    would let pcm_mulaw win over opus) and leaves other streams untouched."""
+    [ffmpeg+boost, rtsp, isapi] order on every rewrite of our stream (rtsp
+    first would let pcm_mulaw win over opus, and HA's rewrite drops the
+    volume boost) and leaves other streams untouched."""
     api = _FakeApi(schemes={"rtsp", "ffmpeg", "isapi"})
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    import custom_components.vdm10.go2rtc as g
+    import custom_components.metzler_vdm10.go2rtc as g
 
     await g.async_configure(hass, runtime)
-    name = "vdm10_vdm10_Q12345678_door_camera"
+    name = "metzler_vdm10_Q12345678_door_camera"
     isapi = g._ISAPI_STREAMS[name]
 
     captured = []
@@ -158,8 +161,14 @@ async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
     import go2rtc_client.rest as _rest
 
     client = _rest._StreamClient(_Base())
+    # HA's rewrite passes its plain ffmpeg mirror - the wrapper must
+    # substitute ours (volume boost) and keep canonical order
     await client.add(name, ["rtsp://u:p@door/ch", f"ffmpeg:{name}#audio=opus"])
-    assert captured[-1] == [f"ffmpeg:{name}#audio=opus", "rtsp://u:p@door/ch", isapi]
+    assert captured[-1] == [
+        f"ffmpeg:{name}#audio=opus#query=log_level=debug#raw=-af#raw=volume=8",
+        "rtsp://u:p@door/ch",
+        isapi,
+    ]
     await client.add("other_stream", ["rtsp://x"])
     assert captured[-1] == ["rtsp://x"]
 
@@ -170,7 +179,7 @@ async def test_streams_add_wrapper_reappends_isapi(hass, runtime, monkeypatch):
 
 async def test_no_go2rtc_is_a_noop(hass, runtime, monkeypatch):
     hass.data.pop("go2rtc", None)
-    import custom_components.vdm10.go2rtc as g
+    import custom_components.metzler_vdm10.go2rtc as g
 
     monkeypatch.setattr(g, "_WAIT_SECONDS", 0)
     await g.async_configure(hass, runtime)  # _wait_for_go2rtc returns None -> early return
@@ -188,7 +197,7 @@ async def test_api_failure_is_swallowed(hass, runtime, monkeypatch):
     api = types.SimpleNamespace(schemes=_Boom())
     _rest_client(monkeypatch, api)
     hass.data["go2rtc"] = types.SimpleNamespace(url="http://localhost:11984", session=None)
-    import custom_components.vdm10.go2rtc as g
+    import custom_components.metzler_vdm10.go2rtc as g
 
     scheduled = []
     monkeypatch.setattr(g, "_schedule_isapi_retry", lambda *a: scheduled.append(a))

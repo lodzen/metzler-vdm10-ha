@@ -230,7 +230,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Vdm10ConfigEntry) -> boo
     if cfg.get(CONF_DOOR_HOST):
         from .go2rtc import async_configure
 
-        entry.async_create_background_task(hass, async_configure(hass, runtime), "vdm10_go2rtc")
+        entry.async_create_background_task(hass, async_configure(hass, runtime), "metzler_vdm10_go2rtc")
     return True
 
 
@@ -266,14 +266,14 @@ def _register_services(hass: HomeAssistant) -> None:
         for runtime in _iter_runtimes(hass):
             answered = await runtime.async_answer_call() or answered
         if not answered:
-            _LOGGER.warning("vdm10.answer_call: no ringing call on any entry")
+            _LOGGER.warning("metzler_vdm10.answer_call: no ringing call on any entry")
 
     async def _hangup(_call: ServiceCall) -> None:
         hung = False
         for runtime in _iter_runtimes(hass):
             hung = await runtime.async_hangup_call() or hung
         if not hung:
-            _LOGGER.warning("vdm10.hangup_call: no active call on any entry")
+            _LOGGER.warning("metzler_vdm10.hangup_call: no active call on any entry")
 
     async def _simulate(_call: ServiceCall) -> None:
         # lets users verify the whole doorbell -> Alexa chain from Developer
@@ -295,7 +295,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 entity.simulate_press()
                 fired = True
         if not fired:
-            _LOGGER.warning("vdm10.simulate_doorbell_press: no doorbell event entity available")
+            _LOGGER.warning("metzler_vdm10.simulate_doorbell_press: no doorbell event entity available")
 
     hass.services.async_register(DOMAIN, SERVICE_ANSWER_CALL, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP_CALL, _hangup)

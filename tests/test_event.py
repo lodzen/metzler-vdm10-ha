@@ -117,7 +117,7 @@ async def test_duplex_rtc_controller_for_two_way_camera(hass, runtime, monkeypat
     from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
     from homeassistant.components.camera import StreamType
 
-    import custom_components.vdm10 as vdm10
+    import custom_components.metzler_vdm10 as vdm10
 
     cam_state = hass.states.get("camera.vdm10_test_door_camera")
     assert cam_state is not None
@@ -164,7 +164,7 @@ async def test_doorbell_press_redirects_to_camera_endpoint(hass, runtime, monkey
 
     from homeassistant.components.alexa.entities import ENTITY_ADAPTERS
 
-    import custom_components.vdm10 as vdm10
+    import custom_components.metzler_vdm10 as vdm10
 
     sent = []
 
@@ -184,7 +184,7 @@ async def test_direct_press_when_event_not_exposed(hass, runtime, monkeypatch):
     not appear in Alexa at all"""
     from types import SimpleNamespace
 
-    import custom_components.vdm10 as vdm10
+    import custom_components.metzler_vdm10 as vdm10
 
     sent = []
 
@@ -207,7 +207,7 @@ async def test_no_direct_press_when_event_exposed(hass, runtime, monkeypatch):
     duplicate press"""
     from types import SimpleNamespace
 
-    import custom_components.vdm10 as vdm10
+    import custom_components.metzler_vdm10 as vdm10
 
     sent = []
 
@@ -226,7 +226,7 @@ async def test_simulate_service_exercises_full_chain(hass, runtime, monkeypatch)
     direct Alexa send - the no-real-ring verification path"""
     from types import SimpleNamespace
 
-    import custom_components.vdm10 as vdm10
+    import custom_components.metzler_vdm10 as vdm10
 
     runtime.station.station.registered.set()
     runtime._poll_registration(None)
@@ -253,7 +253,7 @@ async def test_alexa_config_captured_on_construction(hass, runtime):
     doorbell path - on prod the SmartHomeView wraps it in a route closure"""
     from homeassistant.components.alexa.smart_home import AlexaConfig
 
-    import custom_components.vdm10 as vdm10
+    import custom_components.metzler_vdm10 as vdm10
 
     vdm10._ALEXA_CONFIGS.pop(hass, None)
     cfg = AlexaConfig(hass, {"endpoint": "http://localhost", "filter": {}})

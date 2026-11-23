@@ -10,7 +10,7 @@ localhost-only, nothing leaves the machine.
 import pytest
 from pytest_homeassistant.common import MockConfigEntry
 
-from custom_components.vdm10.const import (
+from custom_components.metzler_vdm10.const import (
     CONF_DOOR_HOST,
     CONF_DOOR_PASSWORD,
     CONF_DOOR_USER,

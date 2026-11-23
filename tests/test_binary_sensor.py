@@ -4,7 +4,7 @@ import pytest
 from pytest_homeassistant.common import MockConfigEntry
 
 from conftest import ENTRY_DATA, fire_indoor_ring, fire_provider_call, fire_ring
-from custom_components.vdm10.const import CONF_SIP_HOST, EVENT_ANSWERED, EVENT_CALL_ENDED, EVENT_RING
+from custom_components.metzler_vdm10.const import CONF_SIP_HOST, EVENT_ANSWERED, EVENT_CALL_ENDED, EVENT_RING
 
 
 @pytest.fixture
@@ -12,7 +12,7 @@ async def provider_runtime(hass, socket_enabled):
     """entry with a provider trunk configured -> the provider registration
     entity exists (pointing at a dead localhost port, so 'off')"""
     entry = MockConfigEntry(
-        domain="vdm10",
+        domain="metzler_vdm10",
         data={**ENTRY_DATA, CONF_SIP_HOST: "127.0.0.1"},
         title="VDM10 test",
         unique_id="Q12345678@127.0.0.1",
@@ -179,10 +179,10 @@ async def test_provider_registration_entity(hass, provider_runtime):
 async def test_fritz_registration_entity_from_options_only(hass, socket_enabled):
     """fritz set via the options flow lands in entry.options - the entity must
     still appear (regression: the gate used to read entry.data only)."""
-    from custom_components.vdm10.const import CONF_FRITZ_HOST, CONF_FRITZ_PASS, CONF_FRITZ_USER
+    from custom_components.metzler_vdm10.const import CONF_FRITZ_HOST, CONF_FRITZ_PASS, CONF_FRITZ_USER
 
     entry = MockConfigEntry(
-        domain="vdm10",
+        domain="metzler_vdm10",
         data=ENTRY_DATA,
         options={CONF_FRITZ_HOST: "127.0.0.1", CONF_FRITZ_USER: "u", CONF_FRITZ_PASS: "p"},
         title="VDM10 test",

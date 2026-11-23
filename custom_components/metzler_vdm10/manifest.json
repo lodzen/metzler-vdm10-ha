@@ -1,5 +1,5 @@
 {
-  "domain": "vdm10",
+  "domain": "metzler_vdm10",
   "name": "VDM10 Intercom",
   "after_dependencies": ["alexa"],
   "categories": ["security_safety.doorbells_intercoms"],
@@ -14,7 +14,7 @@
   "integration_type": "device",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/lodzen/metzler-vdm10-ha/issues",
-  "loggers": ["custom_components.vdm10", "indoor"],
+  "loggers": ["custom_components.metzler_vdm10", "indoor"],
   "requirements": ["vdm10-python==0.1.5"],
   "version": "0.1.22"
 }

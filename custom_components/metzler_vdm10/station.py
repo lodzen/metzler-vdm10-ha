@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_COMPONENT_LOGGER_NAME = __name__.rsplit(".", 1)[0]  # custom_components.vdm10
+_COMPONENT_LOGGER_NAME = __name__.rsplit(".", 1)[0]  # custom_components.metzler_vdm10
 
 
 class _LibraryLogForward(logging.Handler):
@@ -60,7 +60,7 @@ class _LibraryLogForward(logging.Handler):
 
     The library logs everything on one flat logger ("indoor") - forwarding
     (rather than propagation) renames each record to
-    ``custom_components.vdm10.indoor`` so HA's log output and the ``logs:``
+    ``custom_components.metzler_vdm10.indoor`` so HA's log output and the ``logs:``
     level control attribute them to the component, not the library.
     """
 
@@ -71,7 +71,7 @@ class _LibraryLogForward(logging.Handler):
             target.handle(record)
 
 
-# re-parent under the integration so `logs: custom_components.vdm10` gates
+# re-parent under the integration so `logs: custom_components.metzler_vdm10` gates
 # record creation on the library logger; propagate stays off - the handler
 # above re-names each record to the component instead of letting it bubble
 # up under the original "indoor" name

@@ -63,7 +63,7 @@ class Vdm10DoorCamera(Camera):
     def __init__(self, runtime: Vdm10Runtime) -> None:
         super().__init__()
         self.runtime = runtime
-        self._attr_unique_id = f"vdm10_{runtime.serial}_door_camera"
+        self._attr_unique_id = f"{runtime.serial}_door_camera"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, runtime.serial)})
         self._http = None  # shared session - lazy, keeps digest state + keep-alive
 

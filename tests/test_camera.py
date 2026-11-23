@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from homeassistant.components.camera import CameraEntityFeature
 
-from custom_components.vdm10.const import DOOR_STREAM_PATH
+from custom_components.metzler_vdm10.const import DOOR_STREAM_PATH
 
 
 def _camera(hass):
@@ -77,7 +77,7 @@ async def test_snapshot_answers_the_digest_challenge(hass, runtime):
     await site.start()
     try:
         port = runner.addresses[0][1]
-        with patch("custom_components.vdm10.camera.DOOR_ISAPI_PORT", port):
+        with patch("custom_components.metzler_vdm10.camera.DOOR_ISAPI_PORT", port):
             image = await _camera(hass).async_camera_image()
         assert image == b"\xff\xd8jpeg-bytes"
         assert seen and 'username="admin"' in seen[0]

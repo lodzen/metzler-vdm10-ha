@@ -92,12 +92,12 @@ known-first-party = ["custom_components", "metzler"]
 [tool.ty.src]
 include = ["custom_components", "tests"]
 # vendored library copy (built by tools/vendor.py) is not type-checked
-exclude = ["custom_components/vdm10/vendor/metzler"]
+exclude = ["custom_components/metzler_vdm10/vendor/metzler"]
 
 [tool.ty.environment]
 # .venv is auto-discovered by ty; the vendor dir lets `import metzler` resolve
 # to the built vendored copy (excluded from checking itself, above)
-root = [".", "./tests", "./custom_components/vdm10/vendor"]
+root = [".", "./tests", "./custom_components/metzler_vdm10/vendor"]
 
 [tool.ty.rules]
 # HA entities declare writable _attr_* attributes that platforms override with
