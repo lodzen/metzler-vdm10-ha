@@ -53,6 +53,10 @@
           "fritz_pass": "Fritz!Box SIP password",
           "fritz_target": "Number to ring on the fritzfon (e.g. **9)"
         }
+      },
+      "dhcp_confirm": {
+        "title": "VDM10 intercom discovered",
+        "description": "A VDM10 main indoor station was found at {host}. Continue to scan the network for the outdoor station and a free extension slot."
       }
     },
     "error": {

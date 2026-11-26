@@ -442,9 +442,10 @@ async def test_sip_status_provider_invalid_auth(hass, socket_enabled):
 
 
 async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
-    """DHCP event on the registrar's MAC: the unit's role is probed, the LAN
-    scan fills the outdoor station, and the next free slot is probed - the
-    manual form opens with every field derived."""
+    """DHCP event on the registrar's MAC: cheap single-host probes run at
+    discovery time, but the LAN scan and the REGISTER slot probing only run
+    after the user confirms the tile - the manual form then opens with every
+    field derived."""
     from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
     info = DhcpServiceInfo(ip="10.0.0.38", hostname="vdm10-indoor", macaddress="bc9b5e01cab7")
@@ -460,7 +461,7 @@ async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
         patch(
             "custom_components.metzler_vdm10.config_flow._run_discovery",
             return_value=DISCOVERY_RESULT,
-        ),
+        ) as scan,
         patch(
             "custom_components.metzler_vdm10.config_flow._free_extension",
             return_value="10000000002",
@@ -471,8 +472,14 @@ async def test_dhcp_indoor_prefills_everything(hass, socket_enabled):
         ),
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+        # cheap probes run at dhcp time - the scan + slot probing must not
+        assert result["type"] is FlowResultType.FORM and result["step_id"] == "dhcp_confirm"
+        role.assert_called_once_with("10.0.0.38")
+        scan.assert_not_called()
+        probe.assert_not_called()
+        # user confirms the discovered device -> scan + probing, then manual
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.FORM and result["step_id"] == "manual"
-    role.assert_called_once_with("10.0.0.38")
     probe.assert_called_once_with("10.0.0.38")
     markers = {k.schema: k for k in result["data_schema"].schema}
     assert markers[CONF_REGISTRAR_HOST].default() == "10.0.0.38"
@@ -627,5 +634,8 @@ async def test_closed_flow_skips_remaining_probes(hass, socket_enabled):
         ),
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "dhcp"}, data=info)
+        assert result["type"] is FlowResultType.FORM and result["step_id"] == "dhcp_confirm"
+        # user confirms -> scan starts; closing mid-scan aborts before probing
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.ABORT
     probe.assert_not_called()

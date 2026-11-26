@@ -74,7 +74,7 @@ class Vdm10DoorCamera(Camera):
         import aiohttp
 
         if self._http is None or self._http.closed:
-            cfg = self.runtime.entry.data
+            cfg = {**self.runtime.entry.data, **self.runtime.entry.options}
             digest = aiohttp.DigestAuthMiddleware(
                 login=str(cfg.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)),
                 password=str(cfg.get(CONF_DOOR_PASSWORD, "")),
@@ -84,7 +84,7 @@ class Vdm10DoorCamera(Camera):
 
     async def stream_source(self) -> str:
         """credentials embedded - the door demands Basic auth on RTSP DESCRIBE"""
-        cfg = self.runtime.entry.data
+        cfg = {**self.runtime.entry.data, **self.runtime.entry.options}
         user = quote(str(cfg.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)), safe="")
         pwd = quote(str(cfg.get(CONF_DOOR_PASSWORD, "")), safe="")
         auth = f"{user}:{pwd}@" if pwd else ""
@@ -93,7 +93,7 @@ class Vdm10DoorCamera(Camera):
     async def async_camera_image(self, width=None, height=None) -> bytes | None:
         """one-shot ISAPI snapshot (Hikvision /Streaming/channels/101/picture) -
         a fresh single HTTP fetch per request, nothing held open"""
-        cfg = self.runtime.entry.data
+        cfg = {**self.runtime.entry.data, **self.runtime.entry.options}
         url = f"http://{cfg[CONF_DOOR_HOST]}:{DOOR_ISAPI_PORT}/ISAPI/Streaming/channels/101/picture"
         try:
             import aiohttp

@@ -3,7 +3,7 @@
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lodzen&repository=metzler-vdm10-ha&category=integration)
 
 Home Assistant custom integration for the Metzler/Hikvision **VDM10** door intercom.
-It embeds the standalone [`metzler-vdm10`](../metzler-vdm10) SIP library and registers
+It embeds the standalone [`metzler-vdm10`](https://github.com/lodzen/metzler-vdm10) SIP library and registers
 your HA instance as a room station on the VDM10 SIP registrar.
 
 > **Firmware support: VDM10 1.0 only.** The integration targets the VDM10 1.0
@@ -13,23 +13,25 @@ your HA instance as a room station on the VDM10 SIP registrar.
 - `binary_sensor.*_doorbell_ringing` — on while the doorbell rings (events for automations)
 - `camera.*_door` — live view of the outdoor station, **pull-on-demand only**
 - `button.*_answer_call` / `button.*_hang_up` — explicit call control
-- `sensor.*_intercom_status` — registration diagnostics (`registered`/`connecting`/`unavailable`, `last_error`)
+- `binary_sensor.*_intercom_registration` — registration state of the intercom registrar (plus per-trunk sensors for provider/Fritz!Box)
 - Two-way audio via go2rtc/ISAPI — microphone **muted by default**
 - Optional SIP provider / Fritz!Box trunk — the door call rings HA *and* your app/fritzfon; first answer wins
 - LAN auto-discovery for the outdoor station (SADP) and the main indoor (registrar fingerprint)
 
-## Install (HACS / Marketplace custom repository)
+## Install
 
-1. Click the badge above — or in Home Assistant: **Settings → Add-ons → HACS**
-   (or the new Marketplace) → **Custom repositories / Add from link** → add
-   `https://github.com/lodzen/metzler-vdm10-ha` as an *Integration* repository.
-2. Install **VDM10 Intercom**, restart Home Assistant.
-3. **Settings → Devices & Services → Add Integration → VDM10 Intercom** —
-   choose **Search the network** for auto-discovery or **Manual setup**.
+In HACS, search for **VDM10 Intercom**, install it and restart Home Assistant.
 
-The release ZIP ships the `metzler` library vendored under
-`custom_components/metzler_vdm10/vendor/` (built by `tools/vendor.py`) — no manual
-dependency install and no PyPI requirement.
+Until the integration is listed in the default catalog, add it as a custom
+repository first: HACS → **Custom repositories / Add from link** →
+`https://github.com/lodzen/metzler-vdm10-ha` as an *Integration* repository —
+or click the badge above.
+
+Then: **Settings → Devices & Services → Add Integration → VDM10 Intercom** —
+choose **Search the network** for auto-discovery or **Manual setup**.
+
+The `metzler` library is installed automatically from PyPI (`vdm10-python`)
+when the integration is first set up — no manual dependency install.
 
 ## Configuration
 
@@ -71,7 +73,7 @@ REGISTER fingerprint (replies arrive on `:5060`, a firmware quirk).
 With `sip_host` (Linphone, Asterisk, any PBX) and/or the Fritz!Box section
 filled in, an incoming door call is parked for HA **and** INVITEd to the
 trunk — whichever side answers first wins; the other leg is CANCELed.
-`vdm10_answered` reports `by: "ha"` or `by: "other"`. Leaving both empty keeps
+`metzler_vdm10_answered` reports `by: "ha"` or `by: "other"`. Leaving both empty keeps
 HA-only answering.
 
 ## Entities, services, events
@@ -82,12 +84,14 @@ HA-only answering.
 | `camera.*_door` | `CameraEntityFeature.STREAM`; `stream_source` = `rtsp://<door_user>:<door_pass>@<door_host>:554/ch1/main/av_stream`; stills via one-shot ISAPI snapshot |
 | `button.*_answer_call` | `available` only while ringing; press = library 200-OK → established |
 | `button.*_hang_up` | decline while ringing (`486`/`487`), BYE while established |
+| `button.*_unlock_door` | ISAPI door opener pulse on the outdoor station |
+| `button.*_reboot_door_station` | ISAPI reboot of the outdoor station |
 | `metzler_vdm10.answer_call` / `metzler_vdm10.hangup_call` | services equivalent to the buttons |
 | `event.*_doorbell` | `press` edge per ring, deduped by Call-ID — the Alexa announcement trigger |
 | `metzler_vdm10.simulate_doorbell_press` | fires a synthetic press through the same code path — verifies the full Alexa chain without walking to the door |
-| `vdm10_ring` | bus event `{caller, call_id, door}` |
-| `vdm10_answered` | bus event `{call_id, by: "ha" \| "other"}` |
-| `vdm10_call_ended` | bus event `{call_id, reason}` — `answered_elsewhere` is **best-effort** (the registrar's forked-leg CANCEL is identical for answer-elsewhere and caller-timeout) |
+| `metzler_vdm10_ring` | bus event `{caller, call_id, door}` |
+| `metzler_vdm10_answered` | bus event `{call_id, by: "ha" \| "other"}` |
+| `metzler_vdm10_call_ended` | bus event `{call_id, reason}` — `answered_elsewhere` is **best-effort** (the registrar's forked-leg CANCEL is identical for answer-elsewhere and caller-timeout) |
 
 ## Live video — pull on demand only
 
@@ -187,7 +191,7 @@ declares `homeassistant: 2026.11.0` as the install minimum (the camera's
 - **VDM10 1.0 only** — firmware 2.0 speaks a different dialect; not supported.
 - The mic queue (`server.mic` → PCMU silence while empty) is the *fallback*
   talk path; on the primary go2rtc path, mute-by-default is enforced platform-side.
-- `answered_elsewhere` is a best-effort label — see `vdm10_call_ended` above.
+- `answered_elsewhere` is a best-effort label — see `metzler_vdm10_call_ended` above.
 - Library internals: SIP registrar `:5065`, station SIP `:5060`, RTSP `:554`,
   talkback RTP `9654` — never bind TCP 8102 (visNet push port).
 - Discovery probes bind `:5060` briefly (the registrar answers there) — running

@@ -97,7 +97,7 @@ class RebootDoorButton(_Vdm10Button):
     async def async_press(self) -> None:
         import aiohttp
 
-        cfg = self.runtime.entry.data
+        cfg = {**self.runtime.entry.data, **self.runtime.entry.options}
         url = f"http://{cfg[CONF_DOOR_HOST]}:{DOOR_ISAPI_PORT}/ISAPI/System/reboot"
         digest = aiohttp.DigestAuthMiddleware(
             login=str(cfg.get(CONF_DOOR_USER, DEFAULT_DOOR_USER)),

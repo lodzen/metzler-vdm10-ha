@@ -346,7 +346,9 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
         """DHCP discovery (Hikvision OUI match): every VDM10 unit shares the
         OUI, so the tile is only kept for the main indoor - door stations
         (ISAPI on :80) and extension indoors (no :5065 registrar) are
-        suppressed. The LAN scan then fills the door + free extension."""
+        suppressed. Only cheap single-host probes run here; the LAN-wide
+        scan and the extension-slot probing wait for user confirmation
+        (async_step_dhcp_confirm)."""
         self._async_abort_entries_match({CONF_REGISTRAR_HOST: discovery_info.ip})
         self.context["title_placeholders"] = {"host": discovery_info.ip}
         # sentinel unique id: repeated dhcp events collapse into one tile, and
@@ -371,13 +373,24 @@ class Vdm10ConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         except OSError:
             pass
+        return await self.async_step_dhcp_confirm()
+
+    async def async_step_dhcp_confirm(self, user_input: dict | None = None) -> ConfigFlowResult:
+        """confirmation gate behind the dhcp tile: the LAN-wide scan (SADP
+        multicast + subnet sweep) and the REGISTER slot probing against the
+        registrar only run once the user accepts the discovered device."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="dhcp_confirm",
+                description_placeholders={"host": self._prefill.get(CONF_REGISTRAR_HOST, "")},
+            )
         found = await self._scan()
         if not self._flow_alive():
             return self.async_abort(reason="closed")
         if found["doors"]:
             door = found["doors"][0]
             self._prefill[CONF_DOOR_HOST] = door.get("IPv4Address") or door.get("_ip")
-        ext = await self.hass.async_add_executor_job(_free_extension, discovery_info.ip)
+        ext = await self.hass.async_add_executor_job(_free_extension, self._prefill[CONF_REGISTRAR_HOST])
         if not self._flow_alive():
             return self.async_abort(reason="closed")
         if ext:
